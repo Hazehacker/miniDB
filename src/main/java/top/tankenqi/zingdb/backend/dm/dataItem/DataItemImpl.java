@@ -24,6 +24,10 @@ public class DataItemImpl implements DataItem {
     private byte[] oldRaw;
     private Lock rLock;
     private Lock wLock;
+    /**
+     * 保存一个 dm 的引用是因为其释放依赖 dm 的释放
+     * （dm 同时实现了缓存接口，用于缓存 DataItem）
+     */
     private DataManagerImpl dm;
     private long uid;
     private Page pg;
@@ -63,6 +67,7 @@ public class DataItemImpl implements DataItem {
 
     @Override
     public void after(long xid) {
+        // 记录日志
         dm.logDataItem(xid, this);
         wLock.unlock();
     }

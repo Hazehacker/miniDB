@@ -18,13 +18,19 @@ import top.tankenqi.zingdb.backend.utils.RandomUtil;
 public class PageCacheTest {
 
     static Random random = new SecureRandom();
-    
+
     @Test
     public void testPageCache() throws Exception {
         PageCache pc = PageCache.create("/tmp/pcacher_simple_test0", PageCache.PAGE_SIZE * 50);
-        for(int i = 0 ; i < 100; i ++) {
+        /**
+         * 为什么循环 100 次：这是在测试“缓存容量为 50 的情况下，
+         * 创建并持久化 100 个页”的行为，
+         * 即便内存里最多只留得下 50 页（会发生淘汰），
+         * 每个新页都会被写入磁盘，关闭重开后依然能读到全部 100 页的数据
+         */
+        for (int i = 0; i < 100; i++) {
             byte[] tmp = new byte[PageCache.PAGE_SIZE];
-            tmp[0] = (byte)i;
+            tmp[0] = (byte) i;
             int pgno = pc.newPage(tmp);
             Page pg = pc.getPage(pgno);
             pg.setDirty(true);
@@ -33,9 +39,9 @@ public class PageCacheTest {
         pc.close();
 
         pc = PageCache.open("/tmp/pcacher_simple_test0", PageCache.PAGE_SIZE * 50);
-        for(int i = 1; i <= 100; i ++) {
+        for (int i = 1; i <= 100; i++) {
             Page pg = pc.getPage(i);
-            assert pg.getData()[0] == (byte)i-1;
+            assert pg.getData()[0] == (byte) i - 1;
             pg.release();
         }
         pc.close();
@@ -46,12 +52,13 @@ public class PageCacheTest {
     private PageCache pc1;
     private CountDownLatch cdl1;
     private AtomicInteger noPages1;
+
     @Test
     public void testPageCacheMultiSimple() throws Exception {
         pc1 = PageCache.create("/tmp/pcacher_simple_test1", PageCache.PAGE_SIZE * 50);
         cdl1 = new CountDownLatch(200);
         noPages1 = new AtomicInteger(0);
-        for(int i = 0; i < 200; i ++) {
+        for (int i = 0; i < 200; i++) {
             int id = i;
             Runnable r = () -> worker1(id);
             new Thread(r).run();
@@ -61,9 +68,9 @@ public class PageCacheTest {
     }
 
     private void worker1(int id) {
-        for(int i = 0; i < 80; i ++) {
+        for (int i = 0; i < 80; i++) {
             int op = Math.abs(random.nextInt() % 20);
-            if(op == 0) {
+            if (op == 0) {
                 byte[] data = RandomUtil.randomBytes(PageCache.PAGE_SIZE);
                 int pgno = pc1.newPage(data);
                 Page pg = null;
@@ -74,9 +81,9 @@ public class PageCacheTest {
                 }
                 noPages1.incrementAndGet();
                 pg.release();
-            } else if(op < 20) {
+            } else if (op < 20) {
                 int mod = noPages1.intValue();
-                if(mod == 0) {
+                if (mod == 0) {
                     continue;
                 }
                 int pgno = Math.abs(random.nextInt()) % mod + 1;
@@ -92,11 +99,11 @@ public class PageCacheTest {
         cdl1.countDown();
     }
 
-
     private PageCache pc2, mpc;
     private CountDownLatch cdl2;
     private AtomicInteger noPages2;
     private Lock lockNew;
+
     @Test
     public void testPageCacheMulti() throws InterruptedException {
         pc2 = PageCache.create("/tmp/pcacher_multi_test", PageCache.PAGE_SIZE * 10);
@@ -106,7 +113,7 @@ public class PageCacheTest {
         cdl2 = new CountDownLatch(30);
         noPages2 = new AtomicInteger(0);
 
-        for(int i = 0; i < 30; i ++) {
+        for (int i = 0; i < 30; i++) {
             int id = i;
             Runnable r = () -> worker2(id);
             new Thread(r).run();
@@ -117,9 +124,9 @@ public class PageCacheTest {
     }
 
     private void worker2(int id) {
-        for(int i = 0; i < 1000; i ++) {
+        for (int i = 0; i < 1000; i++) {
             int op = Math.abs(random.nextInt() % 20);
-            if(op == 0) {
+            if (op == 0) {
                 // new page
                 byte[] data = RandomUtil.randomBytes(PageCache.PAGE_SIZE);
                 lockNew.lock();
@@ -128,10 +135,11 @@ public class PageCacheTest {
                 assert pgno == mpgno;
                 lockNew.unlock();
                 noPages2.incrementAndGet();
-            } else if(op < 10) {
+            } else if (op < 10) {
                 // check
                 int mod = noPages2.intValue();
-                if(mod == 0) continue;
+                if (mod == 0)
+                    continue;
                 int pgno = Math.abs(random.nextInt()) % mod + 1;
                 Page pg = null, mpg = null;
                 try {
@@ -151,7 +159,8 @@ public class PageCacheTest {
             } else {
                 // update
                 int mod = noPages2.intValue();
-                if(mod == 0) continue;
+                if (mod == 0)
+                    continue;
                 int pgno = Math.abs(random.nextInt()) % mod + 1;
                 Page pg = null, mpg = null;
                 try {
@@ -165,14 +174,14 @@ public class PageCacheTest {
                     Panic.panic(e);
                 }
                 byte[] newData = RandomUtil.randomBytes(PageCache.PAGE_SIZE);
-                
+
                 pg.lock();
                 mpg.setDirty(true);
-                for(int j = 0; j < PageCache.PAGE_SIZE; j ++) {
+                for (int j = 0; j < PageCache.PAGE_SIZE; j++) {
                     mpg.getData()[j] = newData[j];
                 }
                 pg.setDirty(true);
-                for(int j = 0; j < PageCache.PAGE_SIZE; j ++) {
+                for (int j = 0; j < PageCache.PAGE_SIZE; j++) {
                     pg.getData()[j] = newData[j];
                 }
                 pg.unlock();

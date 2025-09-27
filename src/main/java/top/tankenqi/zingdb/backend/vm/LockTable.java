@@ -31,18 +31,22 @@ public class LockTable {
         lock = new ReentrantLock();
     }
 
-    // 不需要等待则返回null，否则返回锁对象
-    // 会造成死锁则抛出异常
+
+    /**
+     * 不需要等待则返回null
+     * 否则返回锁对象
+     * 会造成死锁则抛出异常
+     */
     public Lock add(long xid, long uid) throws Exception {
         lock.lock();
         try {
             if(isInList(x2u, xid, uid)) {
-                return null;
+                return null; // 不需要等待
             }
             if(!u2x.containsKey(uid)) {
                 u2x.put(uid, xid);
                 putIntoList(x2u, xid, uid);
-                return null;
+                return null; // 不需要等待
             }
             waitU.put(xid, uid);
             //putIntoList(wait, xid, uid);
@@ -62,6 +66,11 @@ public class LockTable {
         }
     }
 
+    /**
+     * 在一个事务 commit 或者 abort 时，
+     * 就可以释放所有它持有的锁，并将自身从等待图中删除
+     * @param xid
+     */
     public void remove(long xid) {
         lock.lock();
         try {
@@ -104,9 +113,13 @@ public class LockTable {
         if(l.size() == 0) wait.remove(uid);
     }
 
-    private Map<Long, Integer> xidStamp;
-    private int stamp;
+    private Map<Long, Integer> xidStamp; // XID到时间戳的映射
+    private int stamp; // 时间戳
 
+    /**
+     * 死锁检测
+     * @return 有死锁则返回true，否则返回false
+     */
     private boolean hasDeadLock() {
         xidStamp = new HashMap<>();
         stamp = 1;

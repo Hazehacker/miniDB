@@ -15,14 +15,17 @@ import top.tankenqi.zingdb.backend.tbm.TableManager;
 import top.tankenqi.zingdb.common.Error;
 
 public class Executor {
-    private long xid;
-    TableManager tbm;
+    private long xid; // 事务ID
+    TableManager tbm; // 表管理器
 
     public Executor(TableManager tbm) {
         this.tbm = tbm;
         this.xid = 0;
     }
 
+    /**
+     * 关闭事务
+     */
     public void close() {
         if(xid != 0) {
             System.out.println("Abnormal Abort: " + xid);
@@ -30,6 +33,12 @@ public class Executor {
         }
     }
 
+    /**
+     * 执行SQL语句
+     * @param sql
+     * @return
+     * @throws Exception
+     */
     public byte[] execute(byte[] sql) throws Exception {
         System.out.println("Execute: " + new String(sql));
         Object stat = Parser.Parse(sql);

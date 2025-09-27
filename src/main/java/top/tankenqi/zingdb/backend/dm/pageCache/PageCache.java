@@ -10,28 +10,33 @@ import top.tankenqi.zingdb.backend.utils.Panic;
 import top.tankenqi.zingdb.common.Error;
 
 public interface PageCache {
-    
-    public static final int PAGE_SIZE = 1 << 13;
+
+    public static final int PAGE_SIZE = 1 << 13; // 页面大小，8kb，2^13
 
     int newPage(byte[] initData);
+
     Page getPage(int pgno) throws Exception;
+
     void close();
+
     void release(Page page);
 
     void truncateByBgno(int maxPgno);
+
     int getPageNumber();
+
     void flushPage(Page pg);
 
     public static PageCacheImpl create(String path, long memory) {
-        File f = new File(path+PageCacheImpl.DB_SUFFIX);
+        File f = new File(path + PageCacheImpl.DB_SUFFIX);
         try {
-            if(!f.createNewFile()) {
+            if (!f.createNewFile()) {
                 Panic.panic(Error.FileExistsException);
             }
         } catch (Exception e) {
             Panic.panic(e);
         }
-        if(!f.canRead() || !f.canWrite()) {
+        if (!f.canRead() || !f.canWrite()) {
             Panic.panic(Error.FileCannotRWException);
         }
 
@@ -41,17 +46,17 @@ public interface PageCache {
             raf = new RandomAccessFile(f, "rw");
             fc = raf.getChannel();
         } catch (FileNotFoundException e) {
-           Panic.panic(e);
+            Panic.panic(e);
         }
-        return new PageCacheImpl(raf, fc, (int)memory/PAGE_SIZE);
+        return new PageCacheImpl(raf, fc, (int) memory / PAGE_SIZE);
     }
 
     public static PageCacheImpl open(String path, long memory) {
-        File f = new File(path+PageCacheImpl.DB_SUFFIX);
-        if(!f.exists()) {
+        File f = new File(path + PageCacheImpl.DB_SUFFIX);
+        if (!f.exists()) {
             Panic.panic(Error.FileNotExistsException);
         }
-        if(!f.canRead() || !f.canWrite()) {
+        if (!f.canRead() || !f.canWrite()) {
             Panic.panic(Error.FileCannotRWException);
         }
 
@@ -61,8 +66,8 @@ public interface PageCache {
             raf = new RandomAccessFile(f, "rw");
             fc = raf.getChannel();
         } catch (FileNotFoundException e) {
-           Panic.panic(e);
+            Panic.panic(e);
         }
-        return new PageCacheImpl(raf, fc, (int)memory/PAGE_SIZE);
+        return new PageCacheImpl(raf, fc, (int) memory / PAGE_SIZE);
     }
 }

@@ -14,9 +14,8 @@ public interface DataManager {
     public static DataManager create(String path, long mem, TransactionManager tm) {
         PageCache pc = PageCache.create(path, mem);
         Logger lg = Logger.create(path);
-
         DataManagerImpl dm = new DataManagerImpl(pc, lg, tm);
-        dm.initPageOne();
+        dm.initPageOne(); // 初始化pageOne
         return dm;
     }
 
@@ -24,7 +23,11 @@ public interface DataManager {
         PageCache pc = PageCache.open(path, mem);
         Logger lg = Logger.open(path);
         DataManagerImpl dm = new DataManagerImpl(pc, lg, tm);
-        if(!dm.loadCheckPageOne()) {
+        if (!dm.loadCheckPageOne()) { // 检查pageOne是否正确
+            /**
+             * 如果不正确，说明上次数据库关闭时没有正常关闭，
+             * 数据没有正常落盘，需要从日志进行恢复
+             */
             Recover.recover(tm, lg, pc);
         }
         dm.fillPageIndex();

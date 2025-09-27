@@ -19,24 +19,32 @@ public class Launcher {
 
     public static final int port = 9999;
 
-    public static final long DEFALUT_MEM = (1<<20)*64;
+    public static final long DEFALUT_MEM = (1 << 20) * 64;
     public static final long KB = 1 << 10;
-	public static final long MB = 1 << 20;
-	public static final long GB = 1 << 30;
+    public static final long MB = 1 << 20;
+    public static final long GB = 1 << 30;
 
+    /**
+     * 启动数据库服务
+     * 
+     * @param args
+     * @throws ParseException
+     */
     public static void main(String[] args) throws ParseException {
         Options options = new Options();
         options.addOption("open", true, "-open DBPath");
         options.addOption("create", true, "-create DBPath");
         options.addOption("mem", true, "-mem 64MB");
         CommandLineParser parser = new DefaultParser();
-        CommandLine cmd = parser.parse(options,args);
+        CommandLine cmd = parser.parse(options, args);
 
-        if(cmd.hasOption("open")) {
+        // 打开数据库
+        if (cmd.hasOption("open")) {
             openDB(cmd.getOptionValue("open"), parseMem(cmd.getOptionValue("mem")));
             return;
         }
-        if(cmd.hasOption("create")) {
+        // 创建数据库
+        if (cmd.hasOption("create")) {
             createDB(cmd.getOptionValue("create"));
             return;
         }
@@ -60,22 +68,28 @@ public class Launcher {
         new Server(port, tbm).start();
     }
 
+    /**
+     * 解析内存参数
+     * 
+     * @param memStr
+     * @return
+     */
     private static long parseMem(String memStr) {
-        if(memStr == null || "".equals(memStr)) {
+        if (memStr == null || "".equals(memStr)) {
             return DEFALUT_MEM;
         }
-        if(memStr.length() < 2) {
+        if (memStr.length() < 2) {
             Panic.panic(Error.InvalidMemException);
         }
-        String unit = memStr.substring(memStr.length()-2);
-        long memNum = Long.parseLong(memStr.substring(0, memStr.length()-2));
-        switch(unit) {
+        String unit = memStr.substring(memStr.length() - 2);
+        long memNum = Long.parseLong(memStr.substring(0, memStr.length() - 2));
+        switch (unit) {
             case "KB":
-                return memNum*KB;
+                return memNum * KB;
             case "MB":
-                return memNum*MB;
+                return memNum * MB;
             case "GB":
-                return memNum*GB;
+                return memNum * GB;
             default:
                 Panic.panic(Error.InvalidMemException);
         }

@@ -12,7 +12,7 @@ import top.tankenqi.zingdb.backend.utils.Parser;
  * FreeSpaceOffset: 2字节 空闲位置开始偏移
  */
 public class PageX {
-    
+
     private static final short OF_FREE = 0;
     private static final short OF_DATA = 2;
     public static final int MAX_FREE_SPACE = PageCache.PAGE_SIZE - OF_DATA;
@@ -23,11 +23,12 @@ public class PageX {
         return raw;
     }
 
+    // 设置FSO
     private static void setFSO(byte[] raw, short ofData) {
         System.arraycopy(Parser.short2Byte(ofData), 0, raw, OF_FREE, OF_DATA);
     }
 
-    // 获取pg的FSO
+    // 获取pg的FSO（Free Space Offset），即空闲位置偏移
     public static short getFSO(Page pg) {
         return getFSO(pg.getData());
     }
@@ -39,15 +40,17 @@ public class PageX {
     // 将raw插入pg中，返回插入位置
     public static short insert(Page pg, byte[] raw) {
         pg.setDirty(true);
-        short offset = getFSO(pg.getData());
+        short offset = getFSO(pg.getData()); // 获取页面的空闲位置
+        // 将raw从pg.data的空闲位置处开始拷贝
         System.arraycopy(raw, 0, pg.getData(), offset, raw.length);
-        setFSO(pg.getData(), (short)(offset + raw.length));
+        // 更新FSO
+        setFSO(pg.getData(), (short) (offset + raw.length));
         return offset;
     }
 
     // 获取页面的空闲空间大小
     public static int getFreeSpace(Page pg) {
-        return PageCache.PAGE_SIZE - (int)getFSO(pg.getData());
+        return PageCache.PAGE_SIZE - (int) getFSO(pg.getData());
     }
 
     // 将raw插入pg中的offset位置，并将pg的offset设置为较大的offset
@@ -56,8 +59,8 @@ public class PageX {
         System.arraycopy(raw, 0, pg.getData(), offset, raw.length);
 
         short rawFSO = getFSO(pg.getData());
-        if(rawFSO < offset + raw.length) {
-            setFSO(pg.getData(), (short)(offset+raw.length));
+        if (offset + raw.length > rawFSO) {
+            setFSO(pg.getData(), (short) (offset + raw.length));
         }
     }
 

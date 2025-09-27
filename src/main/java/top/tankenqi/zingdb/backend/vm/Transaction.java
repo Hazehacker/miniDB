@@ -5,11 +5,11 @@ import java.util.Map;
 
 import top.tankenqi.zingdb.backend.tm.TransactionManagerImpl;
 
-// vm对一个事务的抽象
+// vm 对一个事务的抽象
 public class Transaction {
     public long xid;
-    public int level;
-    public Map<Long, Boolean> snapshot;
+    public int level; // 事务隔离级别
+    public Map<Long, Boolean> snapshot; // （当前快照中的活动事务）
     public Exception err;
     public boolean autoAborted;
 

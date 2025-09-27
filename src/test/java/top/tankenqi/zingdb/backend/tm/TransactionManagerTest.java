@@ -24,7 +24,7 @@ public class TransactionManagerTest {
     private TransactionManager tmger;
     // transMap 用的 ConcurrentHashMap，本身就是线程安全的
     private Map<Long, Byte> transMap;
-    private CountDownLatch cdl;
+    private CountDownLatch cdl; // 用于等待所有线程完成
 
     @Test
     public void testMultiThread() {

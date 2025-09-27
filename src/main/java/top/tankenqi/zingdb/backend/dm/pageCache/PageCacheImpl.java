@@ -15,19 +15,20 @@ import top.tankenqi.zingdb.backend.utils.Panic;
 import top.tankenqi.zingdb.common.Error;
 
 public class PageCacheImpl extends AbstractCache<Page> implements PageCache {
-    
+
     private static final int MEM_MIN_LIM = 10;
     public static final String DB_SUFFIX = ".db";
 
     private RandomAccessFile file;
     private FileChannel fc;
-    private Lock fileLock;
+    private Lock fileLock; // 文件锁，防止多个线程同时访问文件
 
+    // 记录当前打开的数据库文件的页面数量，AtomicInteger是原子操作，线程安全的
     private AtomicInteger pageNumbers;
 
     PageCacheImpl(RandomAccessFile file, FileChannel fileChannel, int maxResource) {
         super(maxResource);
-        if(maxResource < MEM_MIN_LIM) {
+        if (maxResource < MEM_MIN_LIM) {
             Panic.panic(Error.MemTooSmallException);
         }
         long length = 0;
@@ -39,18 +40,19 @@ public class PageCacheImpl extends AbstractCache<Page> implements PageCache {
         this.file = file;
         this.fc = fileChannel;
         this.fileLock = new ReentrantLock();
-        this.pageNumbers = new AtomicInteger((int)length / PAGE_SIZE);
+        // 根据文件大小计算出页面数量
+        this.pageNumbers = new AtomicInteger((int) length / PAGE_SIZE);
     }
 
     public int newPage(byte[] initData) {
         int pgno = pageNumbers.incrementAndGet();
         Page pg = new PageImpl(pgno, initData, null);
-        flush(pg);
+        flush(pg); // 新建的页面需要立即写入磁盘
         return pgno;
     }
 
     public Page getPage(int pgno) throws Exception {
-        return get((long)pgno);
+        return get((long) pgno);
     }
 
     /**
@@ -58,7 +60,7 @@ public class PageCacheImpl extends AbstractCache<Page> implements PageCache {
      */
     @Override
     protected Page getForCache(long key) throws Exception {
-        int pgno = (int)key;
+        int pgno = (int) key;
         long offset = PageCacheImpl.pageOffset(pgno);
 
         ByteBuffer buf = ByteBuffer.allocate(PAGE_SIZE);
@@ -66,7 +68,7 @@ public class PageCacheImpl extends AbstractCache<Page> implements PageCache {
         try {
             fc.position(offset);
             fc.read(buf);
-        } catch(IOException e) {
+        } catch (IOException e) {
             Panic.panic(e);
         }
         fileLock.unlock();
@@ -75,20 +77,24 @@ public class PageCacheImpl extends AbstractCache<Page> implements PageCache {
 
     @Override
     protected void releaseForCache(Page pg) {
-        if(pg.isDirty()) {
+        if (pg.isDirty()) {
             flush(pg);
             pg.setDirty(false);
         }
     }
 
     public void release(Page page) {
-        release((long)page.getPageNumber());
+        release((long) page.getPageNumber());
     }
 
     public void flushPage(Page pg) {
         flush(pg);
     }
 
+    /**
+     * 将页面写入磁盘
+     * @param pg
+     */
     private void flush(Page pg) {
         int pgno = pg.getPageNumber();
         long offset = pageOffset(pgno);
@@ -99,7 +105,7 @@ public class PageCacheImpl extends AbstractCache<Page> implements PageCache {
             fc.position(offset);
             fc.write(buf);
             fc.force(false);
-        } catch(IOException e) {
+        } catch (IOException e) {
             Panic.panic(e);
         } finally {
             fileLock.unlock();
@@ -132,7 +138,7 @@ public class PageCacheImpl extends AbstractCache<Page> implements PageCache {
     }
 
     private static long pageOffset(int pgno) {
-        return (pgno-1) * PAGE_SIZE;
+        return (pgno - 1) * PAGE_SIZE;
     }
-    
+
 }

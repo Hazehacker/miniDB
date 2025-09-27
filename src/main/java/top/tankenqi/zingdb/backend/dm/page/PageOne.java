@@ -21,6 +21,10 @@ public class PageOne {
         return raw;
     }
 
+    /**
+     * 启动时设置初始字节
+     * @param pg
+     */
     public static void setVcOpen(Page pg) {
         pg.setDirty(true);
         setVcOpen(pg.getData());
@@ -30,20 +34,30 @@ public class PageOne {
         System.arraycopy(RandomUtil.randomBytes(LEN_VC), 0, raw, OF_VC, LEN_VC);
     }
 
+    /**
+     * 关闭时拷贝字节
+     * @param pg
+     */
     public static void setVcClose(Page pg) {
         pg.setDirty(true);
         setVcClose(pg.getData());
     }
 
     private static void setVcClose(byte[] raw) {
-        System.arraycopy(raw, OF_VC, raw, OF_VC+LEN_VC, LEN_VC);
+        System.arraycopy(raw, OF_VC, raw, OF_VC + LEN_VC, LEN_VC);
     }
 
+    /**
+     * 检验两处字节是否一致
+     * @param pg
+     * @return
+     */
     public static boolean checkVc(Page pg) {
         return checkVc(pg.getData());
     }
 
     private static boolean checkVc(byte[] raw) {
-        return Arrays.equals(Arrays.copyOfRange(raw, OF_VC, OF_VC+LEN_VC), Arrays.copyOfRange(raw, OF_VC+LEN_VC, OF_VC+2*LEN_VC));
+        return Arrays.equals(Arrays.copyOfRange(raw, OF_VC, OF_VC + LEN_VC),
+                Arrays.copyOfRange(raw, OF_VC + LEN_VC, OF_VC + 2 * LEN_VC));
     }
 }
