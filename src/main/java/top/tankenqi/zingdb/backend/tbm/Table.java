@@ -10,16 +10,22 @@ import com.google.common.primitives.Bytes;
 
 import top.tankenqi.zingdb.backend.parser.statement.Create;
 import top.tankenqi.zingdb.backend.parser.statement.Delete;
+import top.tankenqi.zingdb.backend.parser.statement.Expr;
 import top.tankenqi.zingdb.backend.parser.statement.Insert;
+import top.tankenqi.zingdb.backend.parser.statement.OrderItem;
 import top.tankenqi.zingdb.backend.parser.statement.Select;
 import top.tankenqi.zingdb.backend.parser.statement.Update;
 import top.tankenqi.zingdb.backend.parser.statement.Where;
 import top.tankenqi.zingdb.backend.tbm.Field.ParseValueRes;
+import top.tankenqi.zingdb.backend.tbm.plan.ExprEvaluator;
+import top.tankenqi.zingdb.backend.tbm.plan.Planner;
 import top.tankenqi.zingdb.backend.tm.TransactionManagerImpl;
 import top.tankenqi.zingdb.backend.utils.Panic;
 import top.tankenqi.zingdb.backend.utils.ParseStringRes;
 import top.tankenqi.zingdb.backend.utils.Parser;
 import top.tankenqi.zingdb.common.Error;
+import top.tankenqi.zingdb.transport.ColumnType;
+import top.tankenqi.zingdb.transport.ResultSet;
 
 /**
  * Table 维护了表结构
@@ -104,52 +110,74 @@ public class Table {
     }
 
     public int delete(long xid, Delete delete) throws Exception {
-        List<Long> uids = parseWhere(delete.where);
+        List<Long> uids = resolveCandidates(delete.expr);
+        ExprEvaluator ev = new ExprEvaluator(fields);
         int count = 0;
         for (Long uid : uids) {
-            if(((TableManagerImpl)tbm).vm.delete(xid, uid)) {
-                count ++;
+            byte[] raw = ((TableManagerImpl) tbm).vm.read(xid, uid);
+            if (raw == null) continue;
+            Map<String, Object> entry = parseEntry(raw);
+            if (!ev.eval(delete.expr, entry)) continue;
+
+            if (((TableManagerImpl) tbm).vm.delete(xid, uid)) {
+                // 同步删除该行所有 indexed 字段的索引项
+                for (Field f : fields) {
+                    if (f.isIndexed()) {
+                        Object oldVal = entry.get(f.getName());
+                        if (oldVal != null) f.removeIndex(oldVal, uid);
+                    }
+                }
+                count++;
             }
         }
         return count;
     }
 
     public int update(long xid, Update update) throws Exception {
-        List<Long> uids = parseWhere(update.where);
         Field fd = null;
         for (Field f : fields) {
-            if(f.fieldName.equals(update.fieldName)) {
-                fd = f;
-                break;
-            }
+            if (f.getName().equals(update.fieldName)) { fd = f; break; }
         }
-        if(fd == null) {
-            throw Error.FieldNotFoundException;
-        }
-        Object value = fd.string2Value(update.value);
+        if (fd == null) throw Error.FieldNotFoundException;
+        Object newValue = fd.string2Value(update.value);
+
+        List<Long> uids = resolveCandidates(update.expr);
+        ExprEvaluator ev = new ExprEvaluator(fields);
         int count = 0;
         for (Long uid : uids) {
-            byte[] raw = ((TableManagerImpl)tbm).vm.read(xid, uid);
-            if(raw == null) continue;
+            byte[] raw = ((TableManagerImpl) tbm).vm.read(xid, uid);
+            if (raw == null) continue;
+            Map<String, Object> oldEntry = parseEntry(raw);
+            if (!ev.eval(update.expr, oldEntry)) continue;
 
-            ((TableManagerImpl)tbm).vm.delete(xid, uid);
-
-            Map<String, Object> entry = parseEntry(raw);
-            entry.put(fd.fieldName, value);
-            raw = entry2Raw(entry);
-            long uuid = ((TableManagerImpl)tbm).vm.insert(xid, raw);
-            
-            count ++;
-
-            for (Field field : fields) {
-                if(field.isIndexed()) {
-                    field.insert(entry.get(field.fieldName), uuid);
+            // 老行：先删（VM 层 + 所有索引）
+            ((TableManagerImpl) tbm).vm.delete(xid, uid);
+            for (Field f : fields) {
+                if (f.isIndexed()) {
+                    Object ov = oldEntry.get(f.getName());
+                    if (ov != null) f.removeIndex(ov, uid);
                 }
             }
+
+            // 新行：写入 + 重建所有索引（指向新 uid）
+            Map<String, Object> newEntry = new HashMap<>(oldEntry);
+            newEntry.put(fd.getName(), newValue);
+            byte[] newRaw = entry2Raw(newEntry);
+            long newUid = ((TableManagerImpl) tbm).vm.insert(xid, newRaw);
+            for (Field f : fields) {
+                if (f.isIndexed()) {
+                    Object nv = newEntry.get(f.getName());
+                    if (nv != null) f.insert(nv, newUid);
+                }
+            }
+            count++;
         }
         return count;
     }
 
+    /**
+     * 旧版基于 Where 结构的简易读取，仅供旧路径与少量测试使用。新协议走 readForResultSet。
+     */
     public String read(long xid, Select read) throws Exception {
         List<Long> uids = parseWhere(read.where);
         StringBuilder sb = new StringBuilder();
@@ -160,6 +188,130 @@ public class Table {
             sb.append(printEntry(entry)).append("\n");
         }
         return sb.toString();
+    }
+
+    /**
+     * 通用候选解析：
+     *   - 优先使用 Expr AST（新 Planner）；
+     *   - expr 为 null 时返回全表（fullScan）；
+     *   - 候选集是 「超集」，需要由 ExprEvaluator 做二次过滤。
+     */
+    private List<Long> resolveCandidates(Expr expr) throws Exception {
+        Planner planner = new Planner(fields);
+        java.util.Set<Long> set = planner.plan(expr);
+        return new ArrayList<>(set);
+    }
+
+    /**
+     * 与 read 相同语义但返回结构化 ResultSet；走新 Planner + Evaluator 路径，
+     * 支持非索引字段、嵌套 AND/OR/NOT、IN/BETWEEN/LIKE、IS NULL。
+     *
+     * 同时处理 SELECT 的 ORDER BY / LIMIT / OFFSET / COUNT(*)。
+     */
+    public ResultSet readForResultSet(long xid, Select select) throws Exception {
+        // 1. 投影列
+        boolean isCount = select.isCount;
+        boolean isStar = select.fields.length == 1 && "*".equals(select.fields[0]);
+        List<Field> projected = new ArrayList<>();
+        if (!isCount) {
+            if (isStar) {
+                projected.addAll(fields);
+            } else {
+                for (String fname : select.fields) {
+                    Field hit = null;
+                    for (Field f : fields) {
+                        if (f.getName().equals(fname)) { hit = f; break; }
+                    }
+                    if (hit == null) throw Error.FieldNotFoundException;
+                    projected.add(hit);
+                }
+            }
+        }
+
+        // 2. 候选 uid + 过滤 + 收集 entry
+        List<Long> uids = resolveCandidates(select.expr);
+        ExprEvaluator ev = new ExprEvaluator(fields);
+        List<Map<String, Object>> filtered = new ArrayList<>();
+        for (Long uid : uids) {
+            byte[] raw = ((TableManagerImpl) tbm).vm.read(xid, uid);
+            if (raw == null) continue;
+            Map<String, Object> entry = parseEntry(raw);
+            if (!ev.eval(select.expr, entry)) continue;
+            filtered.add(entry);
+        }
+
+        // 3. COUNT(*) 提前返回
+        if (isCount) {
+            ResultSet rs = new ResultSet(new String[]{"count"}, new byte[]{ColumnType.INT64});
+            rs.addRow(new Object[]{(long) filtered.size()});
+            return rs;
+        }
+
+        // 4. ORDER BY（内存排序）
+        if (select.orderBy != null && !select.orderBy.isEmpty()) {
+            final List<OrderItem> ord = select.orderBy;
+            filtered.sort((a, b) -> {
+                for (OrderItem item : ord) {
+                    Object va = a.get(item.fieldName);
+                    Object vb = b.get(item.fieldName);
+                    int c = nullSafeCompare(va, vb);
+                    if (item.desc) c = -c;
+                    if (c != 0) return c;
+                }
+                return 0;
+            });
+        }
+
+        // 5. LIMIT / OFFSET
+        long offset = Math.max(0, select.offset);
+        long limit = select.limit;
+        int from = (int) Math.min(offset, filtered.size());
+        int to = filtered.size();
+        if (limit >= 0) to = (int) Math.min(filtered.size(), from + limit);
+
+        // 6. 投影 + 装配 ResultSet
+        String[] colNames = new String[projected.size()];
+        byte[] colTypes = new byte[projected.size()];
+        for (int i = 0; i < projected.size(); i++) {
+            colNames[i] = projected.get(i).getName();
+            colTypes[i] = mapColumnType(projected.get(i).getType());
+        }
+        ResultSet rs = new ResultSet(colNames, colTypes);
+        for (int i = from; i < to; i++) {
+            Map<String, Object> entry = filtered.get(i);
+            Object[] row = new Object[projected.size()];
+            for (int c = 0; c < projected.size(); c++) {
+                row[c] = entry.get(projected.get(c).getName());
+            }
+            rs.addRow(row);
+        }
+        return rs;
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static int nullSafeCompare(Object a, Object b) {
+        if (a == null && b == null) return 0;
+        if (a == null) return -1;
+        if (b == null) return 1;
+        if (a instanceof Number && b instanceof Number) {
+            return Double.compare(((Number) a).doubleValue(), ((Number) b).doubleValue());
+        }
+        if (a instanceof Boolean && b instanceof Boolean) {
+            return Boolean.compare((Boolean) a, (Boolean) b);
+        }
+        return ((Comparable) a).compareTo(b);
+    }
+
+    private static byte mapColumnType(String fieldType) {
+        switch (fieldType) {
+            case "int32":    return ColumnType.INT32;
+            case "int64":    return ColumnType.INT64;
+            case "string":   return ColumnType.STRING;
+            case "float64":  return ColumnType.FLOAT64;
+            case "bool":     return ColumnType.BOOL;
+            case "datetime": return ColumnType.DATETIME;
+            default:         return ColumnType.STRING;
+        }
     }
 
     public void insert(long xid, Insert insert) throws Exception {

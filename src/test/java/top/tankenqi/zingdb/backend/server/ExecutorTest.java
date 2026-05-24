@@ -14,8 +14,8 @@ public class ExecutorTest {
     String path = "/tmp/zingdb";
     long mem = (1 << 20) * 64;
 
-    byte[] CREATE_TABLE = "create table test_table id int32 (index id)".getBytes();
-    byte[] INSERT = "insert into test_table values 2333".getBytes();
+    String CREATE_TABLE = "create table test_table id int32 (index id)";
+    String INSERT = "insert into test_table values 2333";
 
     private Executor testCreate() throws Exception {
         TransactionManager tm = TransactionManager.create(path);
@@ -27,40 +27,31 @@ public class ExecutorTest {
         return exe;
     }
 
-    private void testInsert(Executor exe, int times, int no) throws Exception {
+    private void testInsert(Executor exe, int times, int no) {
         for (int i = 0; i < times; i++) {
-            System.out.print(no+":"+i + ":");
             exe.execute(INSERT);
         }
     }
-    
+
     @Test
     public void testInsert10000() throws Exception {
         Executor exe = testCreate();
         testInsert(exe, 10000, 1);
-        new File(path + ".db").delete();
-        new File(path + ".bt").delete();
-        new File(path + ".log").delete();
-        new File(path + ".xid").delete();
+        cleanup();
     }
 
     private void testMultiInsert(int total, int noWorkers) throws Exception {
         Executor exe = testCreate();
-        // 这里必须用不同的executor，否则会出现并发问题
         TableManager tbm = exe.tbm;
-        int w = total/noWorkers;
+        int w = total / noWorkers;
         CountDownLatch cdl = new CountDownLatch(noWorkers);
-        for(int i = 0; i < noWorkers; i ++) {
+        for (int i = 0; i < noWorkers; i++) {
             final int no = i;
-            new Thread(new Runnable(){
-                @Override
-                public void run() {
-                    try {
-                        testInsert(new Executor(tbm), w, no);
-                        cdl.countDown();
-                    } catch (Exception e) {
-                        e.printStackTrace();
-                    }
+            new Thread(() -> {
+                try {
+                    testInsert(new Executor(tbm), w, no);
+                } finally {
+                    cdl.countDown();
                 }
             }).start();
         }
@@ -70,6 +61,10 @@ public class ExecutorTest {
     @Test
     public void test100000With4() throws Exception {
         testMultiInsert(10000, 4);
+        cleanup();
+    }
+
+    private void cleanup() {
         new File(path + ".db").delete();
         new File(path + ".bt").delete();
         new File(path + ".log").delete();

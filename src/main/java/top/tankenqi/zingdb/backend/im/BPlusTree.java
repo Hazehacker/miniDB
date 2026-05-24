@@ -116,6 +116,29 @@ public class BPlusTree {
         }
     }
 
+    /**
+     * 删除一个 (key, uid) 索引项。返回 true 表示找到并删除；false 表示未命中。
+     *
+     * 由于同一个 key 可能对应多个 uid（业务上没有唯一约束），必须精确匹配 uid。
+     * 沿叶子层的 sibling 链向右扫描，直到 key 已经超出范围。
+     */
+    public boolean delete(long key, long uid) throws Exception {
+        long leafUid = searchLeaf(rootUid(), key);
+        while (leafUid != 0) {
+            Node leaf = Node.loadNode(this, leafUid);
+            try {
+                if (leaf.leafRemove(key, uid)) return true;
+                // 检查本叶子最后一个 key 是否 >= 目标 key，若不是说明还可能在右兄弟
+                long sib = leaf.siblingUid();
+                if (sib == 0) return false;
+                leafUid = sib;
+            } finally {
+                leaf.release();
+            }
+        }
+        return false;
+    }
+
     class InsertRes {
         long newNode, newKey;
     }

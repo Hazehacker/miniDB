@@ -5,6 +5,8 @@ import org.apache.commons.cli.CommandLineParser;
 import org.apache.commons.cli.DefaultParser;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import top.tankenqi.zingdb.backend.dm.DataManager;
 import top.tankenqi.zingdb.backend.server.Server;
@@ -16,6 +18,8 @@ import top.tankenqi.zingdb.backend.vm.VersionManagerImpl;
 import top.tankenqi.zingdb.common.Error;
 
 public class Launcher {
+
+    private static final Logger log = LoggerFactory.getLogger(Launcher.class);
 
     public static final int port = 9999;
 
@@ -48,19 +52,22 @@ public class Launcher {
             createDB(cmd.getOptionValue("create"));
             return;
         }
-        System.out.println("Usage: launcher (open|create) DBPath");
+        System.err.println("Usage: launcher (open|create) DBPath");
     }
 
     private static void createDB(String path) {
+        log.info("creating database at {}", path);
         TransactionManager tm = TransactionManager.create(path);
         DataManager dm = DataManager.create(path, DEFALUT_MEM, tm);
         VersionManager vm = new VersionManagerImpl(tm, dm);
         TableManager.create(path, vm, dm);
         tm.close();
         dm.close();
+        log.info("database created.");
     }
 
     private static void openDB(String path, long mem) {
+        log.info("opening database at {} (mem={} bytes)", path, mem);
         TransactionManager tm = TransactionManager.open(path);
         DataManager dm = DataManager.open(path, mem, tm);
         VersionManager vm = new VersionManagerImpl(tm, dm);

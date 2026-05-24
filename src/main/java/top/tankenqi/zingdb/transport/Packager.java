@@ -1,25 +1,35 @@
 package top.tankenqi.zingdb.transport;
 
-public class Packager {
-    private Transporter transpoter;
-    private Encoder encoder;
+import java.io.IOException;
+import java.util.Arrays;
 
-    public Packager(Transporter transpoter, Encoder encoder) {
-        this.transpoter = transpoter;
+/**
+ * 把 Transporter 的字节帧与 Encoder 的逻辑 Package 串起来。
+ *
+ * 上层（Server/Client）只感知 Package，不直接接触字节。
+ */
+public class Packager {
+    private final Transporter transporter;
+    private final Encoder encoder;
+
+    public Packager(Transporter transporter, Encoder encoder) {
+        this.transporter = transporter;
         this.encoder = encoder;
     }
 
     public void send(Package pkg) throws Exception {
-        byte[] data = encoder.encode(pkg);
-        transpoter.send(data);
+        byte[] payload = encoder.encode(pkg);
+        transporter.send(pkg.getType(), payload);
     }
 
     public Package receive() throws Exception {
-        byte[] data = transpoter.receive();
-        return encoder.decode(data);
+        byte[] raw = transporter.receive();
+        byte type = raw[0];
+        byte[] payload = Arrays.copyOfRange(raw, 1, raw.length);
+        return encoder.decode(type, payload);
     }
 
-    public void close() throws Exception {
-        transpoter.close();
+    public void close() throws IOException {
+        transporter.close();
     }
 }

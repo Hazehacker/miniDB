@@ -208,6 +208,54 @@ public class Node {
         long siblingUid, newSon, newKey;
     }
 
+    /**
+     * 在叶子节点中删除 (key, uid) 对应的条目。
+     *
+     * 实现策略：
+     *   - 仅在叶子层删除；中间节点不维护，因为：
+     *     1. 中间 key 仍然作为路由有效，删条目不影响搜索路径正确性；
+     *     2. 教学型实现可接受空间不回收（不做合并 / rebalance）。
+     *   - 写入前先 dataItem.before()，删除失败/异常用 unBefore() 回滚，成功后 after(SUPER_XID)。
+     *   - 返回 found：true 表示在本节点定位并删除成功；false 表示本节点未命中（caller 顺 sibling 链继续找）。
+     *   - 同 key 多 uid 时严格匹配 uid，避免误删。
+     */
+    public boolean leafRemove(long key, long uid) throws Exception {
+        if (!isLeaf()) return false;
+        boolean changed = false;
+        dataItem.before();
+        try {
+            int noKeys = getRawNoKeys(raw);
+            for (int i = 0; i < noKeys; i++) {
+                long ik = getRawKthKey(raw, i);
+                if (ik < key) continue;
+                if (ik > key) break;
+                long iSon = getRawKthSon(raw, i);
+                if (iSon == uid) {
+                    // 把 [i+1..noKeys-1] 向前挪一格
+                    int begin = raw.start + NODE_HEADER_SIZE + i * (8 * 2);
+                    int end = raw.start + NODE_HEADER_SIZE + noKeys * (8 * 2);
+                    System.arraycopy(raw.raw, begin + (8 * 2), raw.raw, begin, end - begin - (8 * 2));
+                    setRawNoKeys(raw, noKeys - 1);
+                    changed = true;
+                    break;
+                }
+            }
+            return changed;
+        } finally {
+            if (changed) {
+                dataItem.after(TransactionManagerImpl.SUPER_XID);
+            } else {
+                dataItem.unBefore();
+            }
+        }
+    }
+
+    public long siblingUid() {
+        dataItem.rLock();
+        try { return getRawSibling(raw); }
+        finally { dataItem.rUnLock(); }
+    }
+
     public InsertAndSplitRes insertAndSplit(long uid, long key) throws Exception {
         boolean success = false;
         Exception err = null;

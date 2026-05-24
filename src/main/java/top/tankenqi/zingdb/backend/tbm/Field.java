@@ -14,10 +14,12 @@ import top.tankenqi.zingdb.backend.utils.Parser;
 import top.tankenqi.zingdb.common.Error;
 
 /**
- * field 表示字段信息
- * 二进制格式为：
- * [FieldName][TypeName][IndexUid]
- * 如果field无索引，IndexUid为0
+ * 表字段。磁盘结构：[FieldName][TypeName][IndexUid]，IndexUid==0 表示无索引。
+ *
+ * 阶段 2 扩展：
+ *   - 类型新增 float64 / bool / datetime
+ *   - value2Uid 改为类型敏感（float64 用 doubleToLongBits 排序近似，bool=>0/1，datetime=>毫秒）
+ *   - string2Value 支持 "null" 字面量（返回 Java null）
  */
 public class Field {
     long uid;
@@ -30,7 +32,7 @@ public class Field {
     public static Field loadField(Table tb, long uid) {
         byte[] raw = null;
         try {
-            raw = ((TableManagerImpl)tb.tbm).vm.read(TransactionManagerImpl.SUPER_XID, uid);
+            raw = ((TableManagerImpl) tb.tbm).vm.read(TransactionManagerImpl.SUPER_XID, uid);
         } catch (Exception e) {
             Panic.panic(e);
         }
@@ -58,11 +60,11 @@ public class Field {
         res = Parser.parseString(Arrays.copyOfRange(raw, position, raw.length));
         fieldType = res.str;
         position += res.next;
-        this.index = Parser.parseLong(Arrays.copyOfRange(raw, position, position+8));
-        if(index != 0) {
+        this.index = Parser.parseLong(Arrays.copyOfRange(raw, position, position + 8));
+        if (index != 0) {
             try {
-                bt = BPlusTree.load(index, ((TableManagerImpl)tb.tbm).dm);
-            } catch(Exception e) {
+                bt = BPlusTree.load(index, ((TableManagerImpl) tb.tbm).dm);
+            } catch (Exception e) {
                 Panic.panic(e);
             }
         }
@@ -72,9 +74,9 @@ public class Field {
     public static Field createField(Table tb, long xid, String fieldName, String fieldType, boolean indexed) throws Exception {
         typeCheck(fieldType);
         Field f = new Field(tb, fieldName, fieldType, 0);
-        if(indexed) {
-            long index = BPlusTree.create(((TableManagerImpl)tb.tbm).dm);
-            BPlusTree bt = BPlusTree.load(index, ((TableManagerImpl)tb.tbm).dm);
+        if (indexed) {
+            long index = BPlusTree.create(((TableManagerImpl) tb.tbm).dm);
+            BPlusTree bt = BPlusTree.load(index, ((TableManagerImpl) tb.tbm).dm);
             f.index = index;
             f.bt = bt;
         }
@@ -86,22 +88,38 @@ public class Field {
         byte[] nameRaw = Parser.string2Byte(fieldName);
         byte[] typeRaw = Parser.string2Byte(fieldType);
         byte[] indexRaw = Parser.long2Byte(index);
-        this.uid = ((TableManagerImpl)tb.tbm).vm.insert(xid, Bytes.concat(nameRaw, typeRaw, indexRaw));
+        this.uid = ((TableManagerImpl) tb.tbm).vm.insert(xid, Bytes.concat(nameRaw, typeRaw, indexRaw));
     }
 
     private static void typeCheck(String fieldType) throws Exception {
-        if(!"int32".equals(fieldType) && !"int64".equals(fieldType) && !"string".equals(fieldType)) {
-            throw Error.InvalidFieldException;
+        switch (fieldType) {
+            case "int32":
+            case "int64":
+            case "string":
+            case "float64":
+            case "bool":
+            case "datetime":
+                return;
+            default:
+                throw Error.InvalidFieldException;
         }
     }
 
-    public boolean isIndexed() {
-        return index != 0;
-    }
+    public boolean isIndexed() { return index != 0; }
+    public long getIndexUid() { return index; }
+    public BPlusTree getBTree() { return bt; }
+    public String getName() { return fieldName; }
+    public String getType() { return fieldType; }
 
     public void insert(Object key, long uid) throws Exception {
         long uKey = value2Uid(key);
         bt.insert(uKey, uid);
+    }
+
+    /** B+ Tree 中删除 (key,uid) 对应的索引项。返回是否成功定位到该项。 */
+    public boolean removeIndex(Object key, long uid) throws Exception {
+        long uKey = value2Uid(key);
+        return bt.delete(uKey, uid);
     }
 
     public List<Long> search(long left, long right) throws Exception {
@@ -109,62 +127,85 @@ public class Field {
     }
 
     public Object string2Value(String str) {
-        switch(fieldType) {
-            case "int32":
-                return Integer.parseInt(str);
-            case "int64":
-                return Long.parseLong(str);
-            case "string":
-                return str;
+        if (str == null) return null;       // 仅 Java null（来自 Literal.nullLiteral）当作 SQL NULL
+        switch (fieldType) {
+            case "int32":    return Integer.parseInt(str);
+            case "int64":    return Long.parseLong(str);
+            case "string":   return str;
+            case "float64":  return Double.parseDouble(str);
+            case "bool":     return parseBool(str);
+            case "datetime": return parseDateTime(str);
         }
         return null;
     }
 
+    private static Boolean parseBool(String s) {
+        String t = s.trim().toLowerCase();
+        if ("true".equals(t) || "1".equals(t)) return Boolean.TRUE;
+        if ("false".equals(t) || "0".equals(t)) return Boolean.FALSE;
+        throw new RuntimeException("invalid bool literal: " + s);
+    }
+
+    /** datetime 字面量：纯数字视为毫秒；否则尝试 ISO 格式 yyyy-MM-dd HH:mm:ss。 */
+    private static Long parseDateTime(String s) {
+        try { return Long.parseLong(s); } catch (NumberFormatException ignore) {}
+        try {
+            java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+            return sdf.parse(s).getTime();
+        } catch (java.text.ParseException ignored) {}
+        try {
+            java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyy-MM-dd");
+            return sdf.parse(s).getTime();
+        } catch (java.text.ParseException ignored) {}
+        throw new RuntimeException("invalid datetime literal: " + s);
+    }
+
+    /** 把值映射到 B+ Tree 的 long key。 */
     public long value2Uid(Object key) {
-        long uid = 0;
-        switch(fieldType) {
+        if (key == null) return 0L;
+        switch (fieldType) {
             case "string":
-                uid = Parser.str2Uid((String)key);
-                break;
+                return Parser.str2Uid((String) key);
             case "int32":
-                int uint = (int)key;
-                return (long)uint;
+                return (long) ((Integer) key).intValue();
             case "int64":
-                uid = (long)key;
-                break;
+            case "datetime":
+                return ((Number) key).longValue();
+            case "float64":
+                // 教学型实现：用 IEEE 754 位模式做近似排序。负数排序不严格正确，但等值匹配 OK。
+                return Double.doubleToLongBits(((Number) key).doubleValue());
+            case "bool":
+                return ((Boolean) key) ? 1L : 0L;
         }
-        return uid;
+        return 0L;
     }
 
     public byte[] value2Raw(Object v) {
-        byte[] raw = null;
-        switch(fieldType) {
-            case "int32":
-                raw = Parser.int2Byte((int)v);
-                break;
-            case "int64":
-                raw = Parser.long2Byte((long)v);
-                break;
-            case "string":
-                raw = Parser.string2Byte((String)v);
-                break;
+        switch (fieldType) {
+            case "int32":    return Parser.int2Byte((Integer) v);
+            case "int64":    return Parser.long2Byte((Long) v);
+            case "string":   return Parser.string2Byte((String) v);
+            case "float64":  return Parser.long2Byte(Double.doubleToRawLongBits((Double) v));
+            case "bool":     return new byte[] { (byte) (((Boolean) v) ? 1 : 0) };
+            case "datetime": return Parser.long2Byte((Long) v);
         }
-        return raw;
+        return new byte[0];
     }
 
-    class ParseValueRes {
-        Object v;
-        int shift;
+    public static class ParseValueRes {
+        public Object v;
+        public int shift;
     }
 
     public ParseValueRes parserValue(byte[] raw) {
         ParseValueRes res = new ParseValueRes();
-        switch(fieldType) {
+        switch (fieldType) {
             case "int32":
                 res.v = Parser.parseInt(Arrays.copyOf(raw, 4));
                 res.shift = 4;
                 break;
             case "int64":
+            case "datetime":
                 res.v = Parser.parseLong(Arrays.copyOf(raw, 8));
                 res.shift = 8;
                 break;
@@ -173,48 +214,55 @@ public class Field {
                 res.v = r.str;
                 res.shift = r.next;
                 break;
+            case "float64":
+                long bits = Parser.parseLong(Arrays.copyOf(raw, 8));
+                res.v = Double.longBitsToDouble(bits);
+                res.shift = 8;
+                break;
+            case "bool":
+                res.v = raw[0] != 0;
+                res.shift = 1;
+                break;
+            default:
+                throw new RuntimeException("unknown field type: " + fieldType);
         }
         return res;
     }
 
     public String printValue(Object v) {
-        String str = null;
-        switch(fieldType) {
-            case "int32":
-                str = String.valueOf((int)v);
-                break;
-            case "int64":
-                str = String.valueOf((long)v);
-                break;
-            case "string":
-                str = (String)v;
-                break;
+        if (v == null) return "NULL";
+        switch (fieldType) {
+            case "int32":    return String.valueOf((Integer) v);
+            case "int64":    return String.valueOf((Long) v);
+            case "string":   return (String) v;
+            case "float64":  return String.valueOf((Double) v);
+            case "bool":     return String.valueOf((Boolean) v);
+            case "datetime": {
+                long ms = (Long) v;
+                java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+                return sdf.format(new java.util.Date(ms));
+            }
         }
-        return str;
+        return String.valueOf(v);
     }
 
     @Override
     public String toString() {
         return new StringBuilder("(")
-            .append(fieldName)
-            .append(", ")
-            .append(fieldType)
-            .append(index!=0?", Index":", NoIndex")
-            .append(")")
-            .toString();
+            .append(fieldName).append(", ").append(fieldType)
+            .append(index != 0 ? ", Index" : ", NoIndex")
+            .append(")").toString();
     }
 
     public FieldCalRes calExp(SingleExpression exp) throws Exception {
         Object v = null;
         FieldCalRes res = new FieldCalRes();
-        switch(exp.compareOp) {
+        switch (exp.compareOp) {
             case "<":
                 res.left = 0;
                 v = string2Value(exp.value);
                 res.right = value2Uid(v);
-                if(res.right > 0) {
-                    res.right --;
-                }
+                if (res.right > 0) res.right--;
                 break;
             case "=":
                 v = string2Value(exp.value);

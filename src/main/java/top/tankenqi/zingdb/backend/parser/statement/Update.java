@@ -5,4 +5,5 @@ public class Update {
     public String fieldName;
     public String value;
     public Where where;
+    public Expr expr;     // 新 WHERE AST
 }

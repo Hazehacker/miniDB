@@ -4,7 +4,7 @@ import top.tankenqi.zingdb.transport.Package;
 import top.tankenqi.zingdb.transport.Packager;
 
 public class RoundTripper {
-    private Packager packager;
+    private final Packager packager;
 
     public RoundTripper(Packager packager) {
         this.packager = packager;

@@ -16,6 +16,20 @@ buildNumber.properties
 .classpath
 .vscode/
 .idea/
+.metals/
+.bloop/
+.bsp/
+
+# Tool work dirs
+.claude/
 
 # macOS Finder
 .DS_Store
+
+# ZingDB runtime artifacts (default data files used during local tests)
+/zingdb.db
+/zingdb.bt
+/zingdb.log
+/zingdb.xid
+*.db_tmp
+*.bt_tmp
