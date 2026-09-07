@@ -1,7 +1,7 @@
 package top.tankenqi.zingdb.backend.common;
 
 import java.util.HashMap;
-import java.util.Set;
+import java.util.ArrayList;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -123,13 +123,13 @@ public abstract class AbstractCache<T> {
     protected void close() {
         lock.lock();
         try {
-            Set<Long> keys = cache.keySet();
-            for (long key : keys) {
+            for (long key : new ArrayList<>(cache.keySet())) {
                 T obj = cache.get(key);
                 releaseForCache(obj);
                 references.remove(key);
                 cache.remove(key);
             }
+            count = 0;
         } finally {
             lock.unlock();
         }

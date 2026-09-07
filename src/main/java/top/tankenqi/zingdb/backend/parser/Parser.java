@@ -1,5 +1,6 @@
 package top.tankenqi.zingdb.backend.parser;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -91,11 +92,11 @@ public class Parser {
             if (";".equals(next)) { tk.pop(); next = tk.peek(); }
             if (!"".equals(next)) {
                 byte[] errStat = tk.errStat();
-                statErr = new RuntimeException("Invalid statement: " + new String(errStat));
+                statErr = new RuntimeException("Invalid statement: " + new String(errStat, StandardCharsets.UTF_8));
             }
         } catch (Exception e) {
             byte[] errStat = tk.errStat();
-            statErr = new RuntimeException("Invalid statement: " + new String(errStat));
+            statErr = new RuntimeException("Invalid statement: " + new String(errStat, StandardCharsets.UTF_8));
         }
         if (statErr != null) throw statErr;
         return stat;
@@ -478,23 +479,24 @@ public class Parser {
 
     private static Literal parseLiteral(Tokenizer tk) throws Exception {
         String v = tk.peek();
-        if ("".equals(v)) throw Error.InvalidCommandException;
+        boolean quoted = tk.isQuoted();
+        if ("".equals(v) && !quoted) throw Error.InvalidCommandException;
         // 一元负号
-        if ("-".equals(v)) {
+        if ("-".equals(v) && !tk.isQuoted()) {
             tk.pop();
             String num = tk.peek();
             tk.pop();
             return new Literal("-" + num);
         }
         tk.pop();
-        if ("null".equalsIgnoreCase(v)) return Literal.nullLiteral();
+        if (!quoted && "null".equalsIgnoreCase(v)) return Literal.nullLiteral();
         return new Literal(v);
     }
 
     /** 读取一个字面量 token（用于 insert/update 的 value 位置，含 - 号）。 */
     private static String readLiteralToken(Tokenizer tk) throws Exception {
         String v = tk.peek();
-        if ("-".equals(v)) {
+        if ("-".equals(v) && !tk.isQuoted()) {
             tk.pop();
             String num = tk.peek();
             tk.pop();

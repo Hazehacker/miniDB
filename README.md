@@ -1,5 +1,7 @@
 # ZingDB
 
+本仓库的 miniDB 修复版本说明见 [数据正确性修复与验证](docs/data-correctness.md)。本次修复不代表已覆盖全部实训要求；新建数据库的元数据格式有变化，使用前请阅读兼容说明。
+
 > 一个 Java 实现的教学型关系数据库。从零实现存储 / 事务 / MVCC / B+ 树索引 / SQL 解析与执行 / 网络协议 / 终端 UI 全栈，便于学习和调试。
 >
 > 致谢：早期版本借鉴并参考了开源项目 MyDB 的设计与实现，原始版权归 MyDB 原作者所有。本仓库在此基础上做了大量重构与扩展。
@@ -25,7 +27,7 @@ zingdb › select id, name, age from users where age > 18 order by age desc;
 
 | 子系统 | 已实现 |
 |---|---|
-| **存储** | 分页文件、PageCache（LRU）、Redo/Undo 日志恢复 |
+| **存储** | 分页文件、PageCache（引用计数缓存）、Redo/Undo 日志恢复 |
 | **事务** | XID 管理、MVCC（Read Committed / Repeatable Read）、2PL 锁表、死锁检测 |
 | **索引** | B+ Tree：`insert / range scan / delete`，按字段建索引 |
 | **SQL** | 递归下降解析器：`CREATE / DROP / INSERT / SELECT / UPDATE / DELETE` |
@@ -57,7 +59,7 @@ zingdb › select id, name, age from users where age > 18 order by age desc;
 │                       ┌────────────────────┴──────────┐       │
 │   ┌─── VersionManager ───┐    ┌────── DataManager ─────────┐  │
 │   │  Transaction         │    │  Logger (Redo/Undo)        │  │
-│   │  Visibility (MVCC)   │    │  PageCache (LRU)           │  │
+│   │  Visibility (MVCC)   │    │  PageCache (refcount)           │  │
 │   │  LockTable (2PL+DL)  │    │  DataItem / Page           │  │
 │   └─────────┬────────────┘    └──────────┬─────────────────┘  │
 │             │                            │                    │
@@ -360,7 +362,7 @@ src/test/java/top/tankenqi/zingdb/client/ui/TableRendererTest.java    # 终端�
 
 - entry 编码不含 null bitmap → 数据列暂不能持久化 SQL NULL（`IS NULL` 谓词依然可用于查询）。
 - `DROP TABLE` 用墓碑标记实现（booter 维护被删表名单），磁盘上的表 entry 与 B+ Tree 数据不回收。
-- `float64` 通过 IEEE 754 位模式做索引排序，含负数的范围查询排序不严格正确（等值匹配 OK）。
+- `float64` 位模式索引及字符串哈希索引不保持 SQL 大小顺序，范围查询回退到全表扫描；尚未实现有序浮点/字符串索引。
 - 仅支持单表查询，无 `JOIN` / `GROUP BY` / 聚合（除 `COUNT(*)`）。
 - 协议未做 TLS / 鉴权 / 限流。
 

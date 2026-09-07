@@ -32,6 +32,36 @@ public class ExprEvaluator {
         for (Field f : fields) fieldByName.put(f.getName(), f);
     }
 
+    /** 执行前绑定所有字段并检查字面量，不能依赖是否有数据或逻辑短路。 */
+    public void validate(Expr expr) {
+        if (expr == null) return;
+        if (expr instanceof LogicalExpr) {
+            LogicalExpr logical = (LogicalExpr) expr;
+            validate(logical.left);
+            validate(logical.right);
+        } else if (expr instanceof CompareExpr) {
+            CompareExpr comparison = (CompareExpr) expr;
+            Field field = require(comparison.left);
+            if (comparison.right != null) field.string2Value(comparison.right.raw);
+        } else if (expr instanceof InExpr) {
+            InExpr in = (InExpr) expr;
+            Field field = require(in.column);
+            for (Literal value : in.values) field.string2Value(value.raw);
+        } else if (expr instanceof BetweenExpr) {
+            BetweenExpr between = (BetweenExpr) expr;
+            Field field = require(between.column);
+            field.string2Value(between.lo.raw);
+            field.string2Value(between.hi.raw);
+        } else if (expr instanceof LikeExpr) {
+            LikeExpr like = (LikeExpr) expr;
+            if (!"string".equals(require(like.column).getType())) {
+                throw new IllegalArgumentException("LIKE expects a string column");
+            }
+        } else {
+            throw new IllegalArgumentException("Unsupported predicate: " + expr.getClass().getSimpleName());
+        }
+    }
+
     public boolean eval(Expr expr, Map<String, Object> entry) {
         if (expr == null) return true;
 
@@ -137,9 +167,10 @@ public class ExprEvaluator {
     private static int compareTo(Object a, Object b) {
         if (a == null || b == null) return a == b ? 0 : (a == null ? -1 : 1);
         if (a instanceof Number && b instanceof Number) {
-            double da = ((Number) a).doubleValue();
-            double db = ((Number) b).doubleValue();
-            return Double.compare(da, db);
+            if (a instanceof Double || b instanceof Double) {
+                return Double.compare(((Number) a).doubleValue(), ((Number) b).doubleValue());
+            }
+            return Long.compare(((Number) a).longValue(), ((Number) b).longValue());
         }
         if (a instanceof Boolean && b instanceof Boolean) {
             return Boolean.compare((Boolean) a, (Boolean) b);
