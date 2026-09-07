@@ -70,15 +70,15 @@ public class BPlusTree {
         if(isLeaf) {
             return nodeUid;
         } else {
-            long next = searchNext(nodeUid, key);
+            long next = searchNext(nodeUid, key, true);
             return searchLeaf(next, key);
         }
     }
 
-    private long searchNext(long nodeUid, long key) throws Exception {
+    private long searchNext(long nodeUid, long key, boolean leftmost) throws Exception {
         while(true) {
             Node node = Node.loadNode(this, nodeUid);
-            SearchNextRes res = node.searchNext(key);
+            SearchNextRes res = node.searchNext(key, leftmost);
             node.release();
             if(res.uid != 0) return res.uid;
             nodeUid = res.siblingUid;
@@ -152,7 +152,7 @@ public class BPlusTree {
         if(isLeaf) {
             res = insertAndSplit(nodeUid, uid, key);
         } else {
-            long next = searchNext(nodeUid, key);
+            long next = searchNext(nodeUid, key, false);
             InsertRes ir = insert(next, uid, key);
             if(ir.newNode != 0) {
                 res = insertAndSplit(nodeUid, ir.newNode, ir.newKey);

@@ -38,6 +38,8 @@ public class Table {
     long uid;
     String name;
     byte status;
+    private RowDirectory rowDirectory;
+    private static final long ROW_DIRECTORY_MARKER = -1;
     long nextUid;
     List<Field> fields = new ArrayList<>();
 
@@ -68,6 +70,7 @@ public class Table {
             tb.fields.add(Field.createField(tb, xid, fieldName, fieldType, indexed));
         }
 
+        tb.rowDirectory = RowDirectory.create(((TableManagerImpl) tbm).dm);
         return tb.persistSelf(xid);
     }
 
@@ -93,6 +96,13 @@ public class Table {
         while(position < raw.length) {
             long uid = Parser.parseLong(Arrays.copyOfRange(raw, position, position+8));
             position += 8;
+            if (uid == ROW_DIRECTORY_MARKER) {
+                long root = Parser.parseLong(Arrays.copyOfRange(raw, position, position + 8));
+                position += 8;
+                rowDirectory = new RowDirectory(((TableManagerImpl) tbm).dm, root);
+                if (position != raw.length) throw new IllegalStateException("Invalid table row directory metadata");
+                break;
+            }
             fields.add(Field.loadField(this, uid));
         }
         return this;
@@ -105,7 +115,8 @@ public class Table {
         for(Field field : fields) {
             fieldRaw = Bytes.concat(fieldRaw, Parser.long2Byte(field.uid));
         }
-        uid = ((TableManagerImpl)tbm).vm.insert(xid, Bytes.concat(nameRaw, nextRaw, fieldRaw));
+        uid = ((TableManagerImpl)tbm).vm.insert(xid, Bytes.concat(nameRaw, nextRaw, fieldRaw,
+                Parser.long2Byte(ROW_DIRECTORY_MARKER), Parser.long2Byte(rowDirectory.rootUid)));
         return this;
     }
 
@@ -120,13 +131,8 @@ public class Table {
             if (!ev.eval(delete.expr, entry)) continue;
 
             if (((TableManagerImpl) tbm).vm.delete(xid, uid)) {
-                // 同步删除该行所有 indexed 字段的索引项
-                for (Field f : fields) {
-                    if (f.isIndexed()) {
-                        Object oldVal = entry.get(f.getName());
-                        if (oldVal != null) f.removeIndex(oldVal, uid);
-                    }
-                }
+                // 保留历史索引项：回滚和并发快照仍可能需要这个版本。
+                // 真正的可见性由 VM.read 判定，不能在 DELETE 时提前物理删除。
                 count++;
             }
         }
@@ -150,20 +156,15 @@ public class Table {
             Map<String, Object> oldEntry = parseEntry(raw);
             if (!ev.eval(update.expr, oldEntry)) continue;
 
-            // 老行：先删（VM 层 + 所有索引）
-            ((TableManagerImpl) tbm).vm.delete(xid, uid);
-            for (Field f : fields) {
-                if (f.isIndexed()) {
-                    Object ov = oldEntry.get(f.getName());
-                    if (ov != null) f.removeIndex(ov, uid);
-                }
-            }
+            // 先标记旧版本；保留旧索引，避免回滚/快照读丢失原行。
+            if (!((TableManagerImpl) tbm).vm.delete(xid, uid)) continue;
 
             // 新行：写入 + 重建所有索引（指向新 uid）
             Map<String, Object> newEntry = new HashMap<>(oldEntry);
             newEntry.put(fd.getName(), newValue);
             byte[] newRaw = entry2Raw(newEntry);
             long newUid = ((TableManagerImpl) tbm).vm.insert(xid, newRaw);
+            if (rowDirectory != null) rowDirectory.append(newUid);
             for (Field f : fields) {
                 if (f.isIndexed()) {
                     Object nv = newEntry.get(f.getName());
@@ -197,9 +198,20 @@ public class Table {
      *   - 候选集是 「超集」，需要由 ExprEvaluator 做二次过滤。
      */
     private List<Long> resolveCandidates(Expr expr) throws Exception {
-        Planner planner = new Planner(fields);
+        new ExprEvaluator(fields).validate(expr);
+        Planner planner = new Planner(fields, this::scanRows);
         java.util.Set<Long> set = planner.plan(expr);
         return new ArrayList<>(set);
+    }
+
+    private List<Long> scanRows() throws Exception {
+        if (rowDirectory != null) return rowDirectory.scan();
+        // 兼容旧库：有索引的表仍可枚举已有行。旧无索引数据没有表归属信息，
+        // 不能猜测或静默返回空集，必须明确报告不可恢复的格式限制。
+        for (Field field : fields) {
+            if (field.isIndexed()) return field.search(Long.MIN_VALUE, Long.MAX_VALUE);
+        }
+        throw new IllegalStateException("Legacy table has no row directory or index; recreate from source data: " + name);
     }
 
     /**
@@ -225,6 +237,15 @@ public class Table {
                     if (hit == null) throw Error.FieldNotFoundException;
                     projected.add(hit);
                 }
+            }
+        }
+
+        // ORDER BY 列也必须在空表和 COUNT 查询上检查。
+        if (select.orderBy != null) {
+            for (OrderItem item : select.orderBy) {
+                boolean found = false;
+                for (Field field : fields) if (field.getName().equals(item.fieldName)) found = true;
+                if (!found) throw Error.FieldNotFoundException;
             }
         }
 
@@ -294,7 +315,10 @@ public class Table {
         if (a == null) return -1;
         if (b == null) return 1;
         if (a instanceof Number && b instanceof Number) {
-            return Double.compare(((Number) a).doubleValue(), ((Number) b).doubleValue());
+            if (a instanceof Double || b instanceof Double) {
+                return Double.compare(((Number) a).doubleValue(), ((Number) b).doubleValue());
+            }
+            return Long.compare(((Number) a).longValue(), ((Number) b).longValue());
         }
         if (a instanceof Boolean && b instanceof Boolean) {
             return Boolean.compare((Boolean) a, (Boolean) b);
@@ -318,6 +342,7 @@ public class Table {
         Map<String, Object> entry = string2Entry(insert.values);
         byte[] raw = entry2Raw(entry);
         long uid = ((TableManagerImpl)tbm).vm.insert(xid, raw);
+        if (rowDirectory != null) rowDirectory.append(uid);
         for (Field field : fields) {
             if(field.isIndexed()) {
                 field.insert(entry.get(field.fieldName), uid);

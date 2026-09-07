@@ -1,5 +1,8 @@
 package top.tankenqi.zingdb.backend.parser;
 
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
+
 import top.tankenqi.zingdb.common.Error;
 
 /**
@@ -20,6 +23,7 @@ public class Tokenizer {
     private String currentToken;
     private boolean flushToken;
     private Exception err;
+    private boolean quoted;
 
     public Tokenizer(byte[] stat) {
         this.stat = stat;
@@ -40,6 +44,11 @@ public class Tokenizer {
             flushToken = false;
         }
         return currentToken;
+    }
+
+    public boolean isQuoted() throws Exception {
+        peek();
+        return quoted;
     }
 
     public void pop() { flushToken = true; }
@@ -74,6 +83,7 @@ public class Tokenizer {
     }
 
     private String nextMetaState() throws Exception {
+        quoted = false;
         while (true) {
             skipBlanks();
             // 处理注释
@@ -216,23 +226,28 @@ public class Tokenizer {
     }
 
     private String nextQuoteState() throws Exception {
+        quoted = true;
         byte quote = peekByte();
         popByte();
-        StringBuilder sb = new StringBuilder();
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         while (true) {
             Byte b = peekByte();
             if (b == null) {
                 err = Error.InvalidCommandException;
                 throw err;
             }
-            if (b == quote) {
-                popByte();
-                break;
-            }
-            sb.append((char) b.byteValue());
             popByte();
+            if (b == quote) {
+                // SQL 用连续两个引号表示字符串内的一个引号。
+                if (peekByte() != null && peekByte() == quote) {
+                    bytes.write(quote);
+                    popByte();
+                    continue;
+                }
+                return new String(bytes.toByteArray(), StandardCharsets.UTF_8);
+            }
+            bytes.write(b & 0xff);
         }
-        return sb.toString();
     }
 
     static boolean isDigit(byte b) {

@@ -142,14 +142,17 @@ public class Node {
         long siblingUid;
     }
 
-    public SearchNextRes searchNext(long key) {
+    public SearchNextRes searchNext(long key, boolean leftmost) {
         dataItem.rLock();
         try {
             SearchNextRes res = new SearchNextRes();
             int noKeys = getRawNoKeys(raw);
             for(int i = 0; i < noKeys; i ++) {
                 long ik = getRawKthKey(raw, i);
-                if(key < ik) {
+                // 范围查找必须从可能包含重复键的最左子树开始。
+                // 最右节点的最后一项充当 +∞，也必须接住 Long.MAX_VALUE。
+                if (key < ik || (leftmost && key == ik)
+                        || (i == noKeys - 1 && getRawSibling(raw) == 0)) {
                     res.uid = getRawKthSon(raw, i);
                     res.siblingUid = 0;
                     return res;

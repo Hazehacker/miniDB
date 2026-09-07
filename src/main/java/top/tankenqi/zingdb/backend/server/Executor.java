@@ -1,5 +1,6 @@
 package top.tankenqi.zingdb.backend.server;
 
+import java.nio.charset.StandardCharsets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -58,7 +59,7 @@ public class Executor {
         long t0 = System.nanoTime();
         Package result;
         try {
-            Object stat = Parser.Parse(sql.getBytes());
+            Object stat = Parser.Parse(sql.getBytes(StandardCharsets.UTF_8));
             if (stat instanceof Begin) {
                 if (xid != 0) throw Error.NestedTransactionException;
                 BeginRes r = tbm.begin((Begin) stat);

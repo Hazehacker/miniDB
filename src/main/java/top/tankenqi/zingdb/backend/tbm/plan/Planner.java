@@ -24,7 +24,7 @@ import top.tankenqi.zingdb.backend.tbm.Field;
  * 「读 entry → ExprEvaluator 二次过滤」。
  *
  * 这种「候选 + 二次过滤」的设计回答了三个老 bug：
- *   1. 非索引字段：直接返回全表（fullScan via 任一索引字段 [0, MAX]）。
+ *   1. 非索引字段：直接返回全表（通过独立持久化行目录）。
  *   2. AND/OR：CompareExpr 各自走索引拿 uid 集合后做交/并/差，去重。
  *   3. 复杂表达式（IN/BETWEEN/LIKE/IS NULL/NOT/嵌套括号）：Planner 兜底为 fullScan；
  *      正确性由 ExprEvaluator 保证，索引仅作为加速。
@@ -38,27 +38,20 @@ import top.tankenqi.zingdb.backend.tbm.Field;
  */
 public class Planner {
 
-    private final List<Field> fields;
+    @FunctionalInterface
+    public interface RowScan { List<Long> scan() throws Exception; }
+    private final RowScan rowScan;
     private final Map<String, Field> byName;
 
-    public Planner(List<Field> fields) {
-        this.fields = fields;
+    public Planner(List<Field> fields, RowScan rowScan) {
+        this.rowScan = rowScan;
         this.byName = new HashMap<>();
         for (Field f : fields) byName.put(f.getName(), f);
     }
 
-    /** 选一个索引字段，用于全表扫描兜底。优先返回首个索引字段，没有就 null。 */
-    private Field anyIndexed() {
-        for (Field f : fields) if (f.isIndexed()) return f;
-        return null;
-    }
-
-    /** 全表扫描：用任一索引字段做 [0, MAX] range search。无任何索引时返回 null。 */
+    /** 枚举表自己的行目录，业务索引仅作为筛选加速手段。 */
     public Set<Long> fullScan() throws Exception {
-        Field f = anyIndexed();
-        if (f == null) return new LinkedHashSet<>();
-        List<Long> uids = f.search(0, Long.MAX_VALUE);
-        return new LinkedHashSet<>(uids);
+        return new LinkedHashSet<>(rowScan.scan());
     }
 
     /**
@@ -113,14 +106,16 @@ public class Planner {
         Object v = f.string2Value(c.right.raw);
         if (v == null) return null;
         long key = f.value2Uid(v);
+        // 哈希字符串和浮点位模式不是 SQL 的排序顺序，范围条件必须回退扫描。
+        if (!CompareExpr.EQ.equals(c.op) && !orderedIndex(f)) return null;
         switch (c.op) {
             case CompareExpr.EQ:
                 return toSet(f.search(key, key));
             case CompareExpr.LT:
-                if (key == 0) return new LinkedHashSet<>();
-                return toSet(f.search(0, key - 1));
+                if (key == Long.MIN_VALUE) return new LinkedHashSet<>();
+                return toSet(f.search(Long.MIN_VALUE, key - 1));
             case CompareExpr.LE:
-                return toSet(f.search(0, key));
+                return toSet(f.search(Long.MIN_VALUE, key));
             case CompareExpr.GT:
                 if (key == Long.MAX_VALUE) return new LinkedHashSet<>();
                 return toSet(f.search(key + 1, Long.MAX_VALUE));
@@ -149,14 +144,18 @@ public class Planner {
 
     private Set<Long> planBetween(BetweenExpr b) throws Exception {
         Field f = byName.get(b.column.name);
-        if (f == null || !f.isIndexed() || b.negated) return null;
+        if (f == null || !f.isIndexed() || b.negated || !orderedIndex(f)) return null;
         Object lo = f.string2Value(b.lo.raw);
         Object hi = f.string2Value(b.hi.raw);
         if (lo == null || hi == null) return null;
         long klo = f.value2Uid(lo);
         long khi = f.value2Uid(hi);
-        if (klo > khi) { long t = klo; klo = khi; khi = t; }
+        if (klo > khi) return new LinkedHashSet<>();
         return toSet(f.search(klo, khi));
+    }
+
+    private static boolean orderedIndex(Field field) {
+        return !"string".equals(field.getType()) && !"float64".equals(field.getType());
     }
 
     private static Set<Long> toSet(List<Long> list) {
