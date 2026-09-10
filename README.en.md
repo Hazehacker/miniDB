@@ -4,7 +4,7 @@
 >
 > Acknowledgements: early versions of ZingDB borrowed design ideas from the open-source project MyDB. Original copyright remains with the MyDB authors. This repository has since gone through extensive refactoring and feature work.
 >
-> 📖 [中文 README →](./README.md)
+> 📖 [中文 README →](./README.md) · [Architecture & source tour （中文） →](./docs/architecture.md)
 
 ## Screenshot
 
