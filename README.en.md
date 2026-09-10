@@ -1,4 +1,4 @@
-# ZingDB
+# miniDB
 
 > A teaching-grade relational database written from scratch in Java. Implements the full stack from storage, transactions, MVCC, B+ tree indexing, SQL parsing and execution, wire protocol, all the way to a colorful terminal UI — built to be read, debugged, and extended.
 >
@@ -9,7 +9,7 @@
 ## Screenshot
 
 ```
-zingdb › select id, name, age from users where age > 18 order by age desc;
+miniDB › select id, name, age from users where age > 18 order by age desc;
 
 ┌────┬─────────┬─────┐
 │ id │ name    │ age │
@@ -84,58 +84,58 @@ mvn -q compile
 
 ```bash
 mvn -q exec:java \
-  -Dexec.mainClass="top.tankenqi.zingdb.backend.Launcher" \
-  -Dexec.args="-create /tmp/zingdb/db"
+  -Dexec.mainClass="top.zhongnan.minidb.backend.Launcher" \
+  -Dexec.args="-create /tmp/minidb/db"
 ```
 
-This creates `db.db / db.bt / db.log / db.xid` under `/tmp/zingdb/`.
+This creates `db.db / db.bt / db.log / db.xid` under `/tmp/minidb/`.
 
 ### 3. Start the server
 
 ```bash
 mvn -q exec:java \
-  -Dexec.mainClass="top.tankenqi.zingdb.backend.Launcher" \
-  -Dexec.args="-open /tmp/zingdb/db"
+  -Dexec.mainClass="top.zhongnan.minidb.backend.Launcher" \
+  -Dexec.args="-open /tmp/minidb/db"
 ```
 
-You should see `Server - ZingDB server listening on port 9999`.
+You should see `Server - miniDB server listening on port 9999`.
 
 Useful flags:
 - `-mem 128MB` set PageCache memory cap
-- `-Dzingdb.slow.ms=100` slow-query threshold (default 200 ms)
+- `-Dminidb.slow.ms=100` slow-query threshold (default 200 ms)
 
 ### 4. Start the client
 
 In a new terminal:
 
 ```bash
-mvn -q exec:java -Dexec.mainClass="top.tankenqi.zingdb.client.Launcher"
+mvn -q exec:java -Dexec.mainClass="top.zhongnan.minidb.client.Launcher"
 ```
 
 Non-interactive usage:
 
 ```bash
 # one-shot SQL
-mvn -q exec:java -Dexec.mainClass="top.tankenqi.zingdb.client.Launcher" \
+mvn -q exec:java -Dexec.mainClass="top.zhongnan.minidb.client.Launcher" \
   -Dexec.args="-e 'select * from users'"
 
 # script file
-mvn -q exec:java -Dexec.mainClass="top.tankenqi.zingdb.client.Launcher" \
+mvn -q exec:java -Dexec.mainClass="top.zhongnan.minidb.client.Launcher" \
   -Dexec.args="-f schema.sql"
 
 # remote + no color
-mvn -q exec:java -Dexec.mainClass="top.tankenqi.zingdb.client.Launcher" \
+mvn -q exec:java -Dexec.mainClass="top.zhongnan.minidb.client.Launcher" \
   -Dexec.args="--host 10.0.0.5 --port 9999 --no-color"
 ```
 
 ## Using the Client
 
-After launch you'll see a banner and a cyan prompt `zingdb ›`.
+After launch you'll see a banner and a cyan prompt `miniDB ›`.
 
 **Prompt states**
-- `zingdb ›` cyan: idle
-- `zingdb* ›` yellow: inside a transaction (after `begin`)
-- `zingdb! ›` red: the last statement errored (clears on next success)
+- `miniDB ›` cyan: idle
+- `miniDB* ›` yellow: inside a transaction (after `begin`)
+- `miniDB! ›` red: the last statement errored (clears on next success)
 
 **Meta commands (psql-style)**
 
@@ -152,7 +152,7 @@ After launch you'll see a banner and a cyan prompt `zingdb ›`.
 
 **Multi-line input**: commit on a trailing `;`. While buffering you'll see the continuation prompt `       …`.
 
-**History & completion**: arrow keys cycle history (persisted to `~/.zingdb_history`); Tab completes SQL keywords and meta commands.
+**History & completion**: arrow keys cycle history (persisted to `~/.minidb_history`); Tab completes SQL keywords and meta commands.
 
 ## SQL Cheat Sheet
 
@@ -283,7 +283,7 @@ Errors come back as `[CODE] message`. Codes are namespaced by subsystem:
 `show stats` / `\stats` returns:
 
 ```
-zingdb › \stats
+miniDB › \stats
 ┌────────────────────┬──────────┐
 │ metric             │ value    │
 ├────────────────────┼──────────┤
@@ -305,12 +305,12 @@ Slow-query log (default ≥ 200 ms) is logged at `WARN`:
 01:23:45.678 WARN  slow-query - slow query (312 ms) :: select * from big where ...
 ```
 
-Override the threshold with `-Dzingdb.slow.ms=100` when starting the server.
+Override the threshold with `-Dminidb.slow.ms=100` when starting the server.
 
 ## Project Layout
 
 ```
-src/main/java/top/tankenqi/zingdb/
+src/main/java/top/zhongnan/minidb/
 ├─ backend/
 │  ├─ Launcher.java                       entry point (create / open)
 │  ├─ common/                             error codes / exceptions
@@ -337,7 +337,7 @@ src/main/java/top/tankenqi/zingdb/
 ├─ transport/                             protocol layer (Encoder / Transporter / Package / ResultSet)
 └─ common/
    ├─ Error.java                          pre-baked error instances
-   └─ ZingDBException.java                exception base type with error codes
+   └─ MiniDBException.java                exception base type with error codes
 
 src/test/java/...                         66 unit + end-to-end tests
 ```
@@ -349,12 +349,12 @@ src/test/java/...                         66 unit + end-to-end tests
 mvn test
 
 # key test files
-src/test/java/top/tankenqi/zingdb/backend/parser/ParserV2Test.java     # AST parser
-src/test/java/top/tankenqi/zingdb/backend/server/EndToEndSqlTest.java  # end-to-end SQL
-src/test/java/top/tankenqi/zingdb/backend/server/StatsTest.java        # SHOW STATS
-src/test/java/top/tankenqi/zingdb/backend/server/SlowQueryLoggerTest.java
-src/test/java/top/tankenqi/zingdb/transport/PackagerTest.java          # wire protocol
-src/test/java/top/tankenqi/zingdb/client/ui/TableRendererTest.java     # terminal rendering
+src/test/java/top/zhongnan/minidb/backend/parser/ParserV2Test.java     # AST parser
+src/test/java/top/zhongnan/minidb/backend/server/EndToEndSqlTest.java  # end-to-end SQL
+src/test/java/top/zhongnan/minidb/backend/server/StatsTest.java        # SHOW STATS
+src/test/java/top/zhongnan/minidb/backend/server/SlowQueryLoggerTest.java
+src/test/java/top/zhongnan/minidb/transport/PackagerTest.java          # wire protocol
+src/test/java/top/zhongnan/minidb/client/ui/TableRendererTest.java     # terminal rendering
 ```
 
 ## Known Limitations (teaching-grade tradeoffs)

@@ -26,10 +26,16 @@ buildNumber.properties
 # macOS Finder
 .DS_Store
 
-# ZingDB runtime artifacts (default data files used during local tests)
+# miniDB runtime artifacts (default data files used during local tests)
+/minidb.db
+/minidb.bt
+/minidb.log
+/minidb.xid
+*.db_tmp
+*.bt_tmp
+
+# 旧命名的本地数据库文件仍不纳入版本控制
 /zingdb.db
 /zingdb.bt
 /zingdb.log
 /zingdb.xid
-*.db_tmp
-*.bt_tmp

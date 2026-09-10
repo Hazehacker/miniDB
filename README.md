@@ -1,4 +1,4 @@
-# ZingDB
+# miniDB
 
 本仓库的 miniDB 修复版本说明见 [数据正确性修复与验证](docs/data-correctness.md)。本次修复不代表已覆盖全部实训要求；新建数据库的元数据格式有变化，使用前请阅读兼容说明。
 
@@ -8,10 +8,16 @@
 >
 > 📖 [English README →](./README.en.md)
 
+## 命名与启动入口
+
+项目显示名称为 `miniDB`，Java 包根为 `top.zhongnan.minidb`，Maven 坐标为 `top.zhongnan:miniDB:0.2.0-SNAPSHOT`。
+
+慢查询配置使用 `-Dminidb.slow.ms=100`；终端开关使用 `MINIDB_COLOR`、`MINIDB_UNICODE`；客户端历史文件为 `~/.minidb_history`。旧配置键及历史文件不会自动迁移。此次命名调整不改变数据库文件格式及网络协议。上游来源仍见修复说明。
+
 ## 截图
 
 ```
-zingdb › select id, name, age from users where age > 18 order by age desc;
+miniDB › select id, name, age from users where age > 18 order by age desc;
 
 ┌────┬─────────┬─────┐
 │ id │ name    │ age │
@@ -86,58 +92,58 @@ mvn -q compile
 
 ```bash
 mvn -q exec:java \
-  -Dexec.mainClass="top.tankenqi.zingdb.backend.Launcher" \
-  -Dexec.args="-create /tmp/zingdb/db"
+  -Dexec.mainClass="top.zhongnan.minidb.backend.Launcher" \
+  -Dexec.args="-create /tmp/minidb/db"
 ```
 
-会在 `/tmp/zingdb/` 下生成 `db.db / db.bt / db.log / db.xid` 四个文件。
+会在 `/tmp/minidb/` 下生成 `db.db / db.bt / db.log / db.xid` 四个文件。
 
 ### 3. 启动服务端
 
 ```bash
 mvn -q exec:java \
-  -Dexec.mainClass="top.tankenqi.zingdb.backend.Launcher" \
-  -Dexec.args="-open /tmp/zingdb/db"
+  -Dexec.mainClass="top.zhongnan.minidb.backend.Launcher" \
+  -Dexec.args="-open /tmp/minidb/db"
 ```
 
-看到 `Server - ZingDB server listening on port 9999` 即成功。
+看到 `Server - miniDB server listening on port 9999` 即成功。
 
 可选参数：
 - `-mem 128MB` 设置 PageCache 内存上限
-- `-Dzingdb.slow.ms=100` 调慢查询阈值（默认 200ms）
+- `-Dminidb.slow.ms=100` 调慢查询阈值（默认 200ms）
 
 ### 4. 启动客户端
 
 新开一个终端：
 
 ```bash
-mvn -q exec:java -Dexec.mainClass="top.tankenqi.zingdb.client.Launcher"
+mvn -q exec:java -Dexec.mainClass="top.zhongnan.minidb.client.Launcher"
 ```
 
 非交互用法：
 
 ```bash
 # 执行单条 SQL
-mvn -q exec:java -Dexec.mainClass="top.tankenqi.zingdb.client.Launcher" \
+mvn -q exec:java -Dexec.mainClass="top.zhongnan.minidb.client.Launcher" \
   -Dexec.args="-e 'select * from users'"
 
 # 执行脚本文件
-mvn -q exec:java -Dexec.mainClass="top.tankenqi.zingdb.client.Launcher" \
+mvn -q exec:java -Dexec.mainClass="top.zhongnan.minidb.client.Launcher" \
   -Dexec.args="-f schema.sql"
 
 # 远程连接 + 关闭颜色
-mvn -q exec:java -Dexec.mainClass="top.tankenqi.zingdb.client.Launcher" \
+mvn -q exec:java -Dexec.mainClass="top.zhongnan.minidb.client.Launcher" \
   -Dexec.args="--host 10.0.0.5 --port 9999 --no-color"
 ```
 
 ## 客户端使用
 
-启动后会看到一个 banner 和青色提示符 `zingdb ›`。
+启动后会看到一个 banner 和青色提示符 `miniDB ›`。
 
 **提示符状态**
-- `zingdb ›` 青色：空闲
-- `zingdb* ›` 黄色：当前在事务中（begin 之后）
-- `zingdb! ›` 红色：上一条出错（下一条成功后自动恢复）
+- `miniDB ›` 青色：空闲
+- `miniDB* ›` 黄色：当前在事务中（begin 之后）
+- `miniDB! ›` 红色：上一条出错（下一条成功后自动恢复）
 
 **元命令（psql 风格）**
 
@@ -154,7 +160,7 @@ mvn -q exec:java -Dexec.mainClass="top.tankenqi.zingdb.client.Launcher" \
 
 **多行输入**：以 `;` 结尾时提交，中间会看到续行符 `       …`。
 
-**历史与补全**：上下方向键翻历史（持久化到 `~/.zingdb_history`），Tab 补全 SQL 关键字与元命令。
+**历史与补全**：上下方向键翻历史（持久化到 `~/.minidb_history`），Tab 补全 SQL 关键字与元命令。
 
 ## SQL 速查
 
@@ -284,7 +290,7 @@ RESULT_SET payload：
 `show stats` / `\stats` 返回如下指标：
 
 ```
-zingdb › \stats
+miniDB › \stats
 ┌────────────────────┬──────────┐
 │ metric             │ value    │
 ├────────────────────┼──────────┤
@@ -306,12 +312,12 @@ zingdb › \stats
 01:23:45.678 WARN  slow-query - slow query (312 ms) :: select * from big where ...
 ```
 
-调整阈值：启动服务端时加 `-Dzingdb.slow.ms=100`。
+调整阈值：启动服务端时加 `-Dminidb.slow.ms=100`。
 
 ## 项目结构
 
 ```
-src/main/java/top/tankenqi/zingdb/
+src/main/java/top/zhongnan/minidb/
 ├─ backend/
 │  ├─ Launcher.java                      入口（create / open）
 │  ├─ common/                            错误码 / 异常
@@ -338,7 +344,7 @@ src/main/java/top/tankenqi/zingdb/
 ├─ transport/                            协议层（Encoder / Transporter / Package / ResultSet）
 └─ common/
    ├─ Error.java                         预定义错误对象
-   └─ ZingDBException.java               带错误码的异常基类
+   └─ MiniDBException.java               带错误码的异常基类
 
 src/test/java/...                        66 个单元 + 端到端测试
 ```
@@ -350,12 +356,12 @@ src/test/java/...                        66 个单元 + 端到端测试
 mvn test
 
 # 关键测试文件
-src/test/java/top/tankenqi/zingdb/backend/parser/ParserV2Test.java    # AST 解析
-src/test/java/top/tankenqi/zingdb/backend/server/EndToEndSqlTest.java # 端到端 SQL
-src/test/java/top/tankenqi/zingdb/backend/server/StatsTest.java       # SHOW STATS
-src/test/java/top/tankenqi/zingdb/backend/server/SlowQueryLoggerTest.java
-src/test/java/top/tankenqi/zingdb/transport/PackagerTest.java         # 协议
-src/test/java/top/tankenqi/zingdb/client/ui/TableRendererTest.java    # 终端渲染
+src/test/java/top/zhongnan/minidb/backend/parser/ParserV2Test.java    # AST 解析
+src/test/java/top/zhongnan/minidb/backend/server/EndToEndSqlTest.java # 端到端 SQL
+src/test/java/top/zhongnan/minidb/backend/server/StatsTest.java       # SHOW STATS
+src/test/java/top/zhongnan/minidb/backend/server/SlowQueryLoggerTest.java
+src/test/java/top/zhongnan/minidb/transport/PackagerTest.java         # 协议
+src/test/java/top/zhongnan/minidb/client/ui/TableRendererTest.java    # 终端渲染
 ```
 
 ## 已知限制（教学型 DB 取舍）
