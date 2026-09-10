@@ -4,7 +4,7 @@
 >
 > Acknowledgements: early versions of ZingDB borrowed design ideas from the open-source project MyDB. Original copyright remains with the MyDB authors. This repository has since gone through extensive refactoring and feature work.
 >
-> 📖 [中文 README →](./README.md)
+> 📖 [中文 README →](./README.md) · [Architecture & source tour （中文） →](./docs/architecture.md)
 
 ## Screenshot
 
@@ -84,7 +84,7 @@ mvn -q compile
 
 ```bash
 mvn -q exec:java \
-  -Dexec.mainClass="top.zhongnan.minidb.backend.Launcher" \
+  -Dexec.mainClass="top.zhongnan.minidb.engine.Launcher" \
   -Dexec.args="-create /tmp/minidb/db"
 ```
 
@@ -94,7 +94,7 @@ This creates `db.db / db.bt / db.log / db.xid` under `/tmp/minidb/`.
 
 ```bash
 mvn -q exec:java \
-  -Dexec.mainClass="top.zhongnan.minidb.backend.Launcher" \
+  -Dexec.mainClass="top.zhongnan.minidb.engine.Launcher" \
   -Dexec.args="-open /tmp/minidb/db"
 ```
 
@@ -109,22 +109,22 @@ Useful flags:
 In a new terminal:
 
 ```bash
-mvn -q exec:java -Dexec.mainClass="top.zhongnan.minidb.client.Launcher"
+mvn -q exec:java -Dexec.mainClass="top.zhongnan.minidb.cli.Launcher"
 ```
 
 Non-interactive usage:
 
 ```bash
 # one-shot SQL
-mvn -q exec:java -Dexec.mainClass="top.zhongnan.minidb.client.Launcher" \
+mvn -q exec:java -Dexec.mainClass="top.zhongnan.minidb.cli.Launcher" \
   -Dexec.args="-e 'select * from users'"
 
 # script file
-mvn -q exec:java -Dexec.mainClass="top.zhongnan.minidb.client.Launcher" \
+mvn -q exec:java -Dexec.mainClass="top.zhongnan.minidb.cli.Launcher" \
   -Dexec.args="-f schema.sql"
 
 # remote + no color
-mvn -q exec:java -Dexec.mainClass="top.zhongnan.minidb.client.Launcher" \
+mvn -q exec:java -Dexec.mainClass="top.zhongnan.minidb.cli.Launcher" \
   -Dexec.args="--host 10.0.0.5 --port 9999 --no-color"
 ```
 
@@ -311,35 +311,48 @@ Override the threshold with `-Dminidb.slow.ms=100` when starting the server.
 
 ```
 src/main/java/top/zhongnan/minidb/
-├─ backend/
-│  ├─ Launcher.java                       entry point (create / open)
-│  ├─ common/                             error codes / exceptions
-│  ├─ dm/                                 data management (page / cache / log / DataItem)
-│  ├─ tm/                                 transaction ID manager
-│  ├─ vm/                                 MVCC + lock table + deadlock detection
-│  ├─ im/                                 B+ tree index
-│  ├─ tbm/                                table / field / Planner / Evaluator
-│  ├─ parser/                             Tokenizer / Parser / AST
-│  └─ server/                             Server / Executor / Metrics / SlowQueryLogger
-├─ client/
-│  ├─ Launcher.java                       client entry (CLI parsing)
-│  ├─ Client.java / RoundTripper.java     transport helpers
-│  ├─ Shell.java                          JLine REPL
+├─ sql_compiler/                         SQL compiler (lexer / parser / AST / planner)
+│  ├─ Tokenizer.java                     lexer
+│  ├─ Parser.java                        recursive-descent parser
+│  ├─ Planner.java / ExprEvaluator.java  plan generation / expression evaluation
+│  └─ statement/                         AST nodes (23)
+├─ storage/                              storage system
+│  ├─ DataManager.java                   data management (page / cache / log / DataItem)
+│  ├─ page/                              8KB page implementations
+│  ├─ buffer/                            page cache (PageCache)
+│  ├─ dataItem/                          record unit
+│  ├─ logger/                            log file
+│  ├─ pageIndex/                         page metadata index
+│  └─ index/                             B+ tree index
+├─ engine/                               database engine
+│  ├─ Launcher.java                      server entry (create / open)
+│  ├─ Server.java / Executor.java        connection handling / statement dispatch
+│  ├─ ServerMetrics.java                 runtime metrics
+│  ├─ SlowQueryLogger.java               slow-query log
+│  ├─ table/                             table / field / row directory (was tbm)
+│  ├─ tx/                                transaction IDs + MVCC + lock table (was tm / vm)
+│  └─ net/                               protocol layer (Encoder / Transporter / Package / ResultSet)
+├─ cli/                                  command-line interface
+│  ├─ Launcher.java                      client entry (CLI parsing)
+│  ├─ Client.java / RoundTripper.java    transport helpers
+│  ├─ Shell.java                         JLine REPL
 │  └─ ui/
-│     ├─ Ansi.java                        ANSI escape helpers
-│     ├─ Theme.java                       colors + Unicode glyphs
-│     ├─ TerminalCaps.java                terminal capability detection
-│     ├─ TableRenderer.java               ResultSet → Unicode table
-│     ├─ Banner.java                      startup card
-│     ├─ Prompter.java                    prompt state machine
-│     ├─ MetaCommand.java                 \-command parser
-│     └─ HelpPrinter.java                 \h help screen
-├─ transport/                             protocol layer (Encoder / Transporter / Package / ResultSet)
-└─ common/
-   ├─ Error.java                          pre-baked error instances
-   └─ MiniDBException.java                exception base type with error codes
+│     ├─ Ansi.java                       ANSI escape helpers
+│     ├─ Theme.java                      colors + Unicode glyphs
+│     ├─ TerminalCaps.java               terminal capability detection
+│     ├─ TableRenderer.java              ResultSet → Unicode table
+│     ├─ Banner.java                     startup card
+│     ├─ Prompter.java                   prompt state machine
+│     ├─ MetaCommand.java                \-command parser
+│     └─ HelpPrinter.java                \h help screen
+└─ utils/                                utilities and constants
+   ├─ Error.java / MiniDBException.java  pre-baked error instances / exception base type
+   ├─ Panic.java                         fatal-error exit
+   ├─ Parser.java / Types.java           byte codec / type conversion
+   ├─ RandomUtil.java / ParseStringRes.java
+   └─ AbstractCache.java / SubArray.java generic LRU cache / byte view
 
-src/test/java/...                         66 unit + end-to-end tests
+src/test/java/...                         19 test classes / 86 test cases (mirrors main)
 ```
 
 ## Development
@@ -349,12 +362,12 @@ src/test/java/...                         66 unit + end-to-end tests
 mvn test
 
 # key test files
-src/test/java/top/zhongnan/minidb/backend/parser/ParserV2Test.java     # AST parser
-src/test/java/top/zhongnan/minidb/backend/server/EndToEndSqlTest.java  # end-to-end SQL
-src/test/java/top/zhongnan/minidb/backend/server/StatsTest.java        # SHOW STATS
-src/test/java/top/zhongnan/minidb/backend/server/SlowQueryLoggerTest.java
-src/test/java/top/zhongnan/minidb/transport/PackagerTest.java          # wire protocol
-src/test/java/top/zhongnan/minidb/client/ui/TableRendererTest.java     # terminal rendering
+src/test/java/top/zhongnan/minidb/sql_compiler/ParserV2Test.java      # AST parser
+src/test/java/top/zhongnan/minidb/engine/EndToEndSqlTest.java         # end-to-end SQL
+src/test/java/top/zhongnan/minidb/engine/StatsTest.java               # SHOW STATS
+src/test/java/top/zhongnan/minidb/engine/SlowQueryLoggerTest.java
+src/test/java/top/zhongnan/minidb/engine/net/PackagerTest.java        # wire protocol
+src/test/java/top/zhongnan/minidb/cli/ui/TableRendererTest.java       # terminal rendering
 ```
 
 ## Known Limitations (teaching-grade tradeoffs)

@@ -39,3 +39,12 @@ buildNumber.properties
 /zingdb.bt
 /zingdb.log
 /zingdb.xid
+
+# data/ 下的本地运行文件
+/data/*.db
+/data/*.bt
+/data/*.log
+/data/*.xid
+/data/*.db_tmp
+/data/*.bt_tmp
+/data/cp.txt
