@@ -84,7 +84,7 @@ mvn -q compile
 
 ```bash
 mvn -q exec:java \
-  -Dexec.mainClass="top.tankenqi.zingdb.backend.Launcher" \
+  -Dexec.mainClass="top.tankenqi.zingdb.engine.Launcher" \
   -Dexec.args="-create /tmp/zingdb/db"
 ```
 
@@ -94,7 +94,7 @@ This creates `db.db / db.bt / db.log / db.xid` under `/tmp/zingdb/`.
 
 ```bash
 mvn -q exec:java \
-  -Dexec.mainClass="top.tankenqi.zingdb.backend.Launcher" \
+  -Dexec.mainClass="top.tankenqi.zingdb.engine.Launcher" \
   -Dexec.args="-open /tmp/zingdb/db"
 ```
 
@@ -109,22 +109,22 @@ Useful flags:
 In a new terminal:
 
 ```bash
-mvn -q exec:java -Dexec.mainClass="top.tankenqi.zingdb.client.Launcher"
+mvn -q exec:java -Dexec.mainClass="top.tankenqi.zingdb.cli.Launcher"
 ```
 
 Non-interactive usage:
 
 ```bash
 # one-shot SQL
-mvn -q exec:java -Dexec.mainClass="top.tankenqi.zingdb.client.Launcher" \
+mvn -q exec:java -Dexec.mainClass="top.tankenqi.zingdb.cli.Launcher" \
   -Dexec.args="-e 'select * from users'"
 
 # script file
-mvn -q exec:java -Dexec.mainClass="top.tankenqi.zingdb.client.Launcher" \
+mvn -q exec:java -Dexec.mainClass="top.tankenqi.zingdb.cli.Launcher" \
   -Dexec.args="-f schema.sql"
 
 # remote + no color
-mvn -q exec:java -Dexec.mainClass="top.tankenqi.zingdb.client.Launcher" \
+mvn -q exec:java -Dexec.mainClass="top.tankenqi.zingdb.cli.Launcher" \
   -Dexec.args="--host 10.0.0.5 --port 9999 --no-color"
 ```
 
@@ -311,35 +311,48 @@ Override the threshold with `-Dzingdb.slow.ms=100` when starting the server.
 
 ```
 src/main/java/top/tankenqi/zingdb/
-├─ backend/
-│  ├─ Launcher.java                       entry point (create / open)
-│  ├─ common/                             error codes / exceptions
-│  ├─ dm/                                 data management (page / cache / log / DataItem)
-│  ├─ tm/                                 transaction ID manager
-│  ├─ vm/                                 MVCC + lock table + deadlock detection
-│  ├─ im/                                 B+ tree index
-│  ├─ tbm/                                table / field / Planner / Evaluator
-│  ├─ parser/                             Tokenizer / Parser / AST
-│  └─ server/                             Server / Executor / Metrics / SlowQueryLogger
-├─ client/
-│  ├─ Launcher.java                       client entry (CLI parsing)
-│  ├─ Client.java / RoundTripper.java     transport helpers
-│  ├─ Shell.java                          JLine REPL
+├─ sql_compiler/                         SQL compiler (lexer / parser / AST / planner)
+│  ├─ Tokenizer.java                     lexer
+│  ├─ Parser.java                        recursive-descent parser
+│  ├─ Planner.java / ExprEvaluator.java  plan generation / expression evaluation
+│  └─ statement/                         AST nodes (23)
+├─ storage/                              storage system
+│  ├─ DataManager.java                   data management (page / cache / log / DataItem)
+│  ├─ page/                              8KB page implementations
+│  ├─ buffer/                            page cache (PageCache)
+│  ├─ dataItem/                          record unit
+│  ├─ logger/                            log file
+│  ├─ pageIndex/                         page metadata index
+│  └─ index/                             B+ tree index
+├─ engine/                               database engine
+│  ├─ Launcher.java                      server entry (create / open)
+│  ├─ Server.java / Executor.java        connection handling / statement dispatch
+│  ├─ ServerMetrics.java                 runtime metrics
+│  ├─ SlowQueryLogger.java               slow-query log
+│  ├─ table/                             table / field / row directory (was tbm)
+│  ├─ tx/                                transaction IDs + MVCC + lock table (was tm / vm)
+│  └─ net/                               protocol layer (Encoder / Transporter / Package / ResultSet)
+├─ cli/                                  command-line interface
+│  ├─ Launcher.java                      client entry (CLI parsing)
+│  ├─ Client.java / RoundTripper.java    transport helpers
+│  ├─ Shell.java                         JLine REPL
 │  └─ ui/
-│     ├─ Ansi.java                        ANSI escape helpers
-│     ├─ Theme.java                       colors + Unicode glyphs
-│     ├─ TerminalCaps.java                terminal capability detection
-│     ├─ TableRenderer.java               ResultSet → Unicode table
-│     ├─ Banner.java                      startup card
-│     ├─ Prompter.java                    prompt state machine
-│     ├─ MetaCommand.java                 \-command parser
-│     └─ HelpPrinter.java                 \h help screen
-├─ transport/                             protocol layer (Encoder / Transporter / Package / ResultSet)
-└─ common/
-   ├─ Error.java                          pre-baked error instances
-   └─ ZingDBException.java                exception base type with error codes
+│     ├─ Ansi.java                       ANSI escape helpers
+│     ├─ Theme.java                      colors + Unicode glyphs
+│     ├─ TerminalCaps.java               terminal capability detection
+│     ├─ TableRenderer.java              ResultSet → Unicode table
+│     ├─ Banner.java                     startup card
+│     ├─ Prompter.java                   prompt state machine
+│     ├─ MetaCommand.java                \-command parser
+│     └─ HelpPrinter.java                \h help screen
+└─ utils/                                utilities and constants
+   ├─ Error.java / ZingDBException.java  pre-baked error instances / exception base type
+   ├─ Panic.java                         fatal-error exit
+   ├─ Parser.java / Types.java           byte codec / type conversion
+   ├─ RandomUtil.java / ParseStringRes.java
+   └─ AbstractCache.java / SubArray.java generic LRU cache / byte view
 
-src/test/java/...                         66 unit + end-to-end tests
+src/test/java/...                         19 test classes / 86 test cases (mirrors main)
 ```
 
 ## Development
@@ -349,12 +362,12 @@ src/test/java/...                         66 unit + end-to-end tests
 mvn test
 
 # key test files
-src/test/java/top/tankenqi/zingdb/backend/parser/ParserV2Test.java     # AST parser
-src/test/java/top/tankenqi/zingdb/backend/server/EndToEndSqlTest.java  # end-to-end SQL
-src/test/java/top/tankenqi/zingdb/backend/server/StatsTest.java        # SHOW STATS
-src/test/java/top/tankenqi/zingdb/backend/server/SlowQueryLoggerTest.java
-src/test/java/top/tankenqi/zingdb/transport/PackagerTest.java          # wire protocol
-src/test/java/top/tankenqi/zingdb/client/ui/TableRendererTest.java     # terminal rendering
+src/test/java/top/tankenqi/zingdb/sql_compiler/ParserV2Test.java      # AST parser
+src/test/java/top/tankenqi/zingdb/engine/EndToEndSqlTest.java         # end-to-end SQL
+src/test/java/top/tankenqi/zingdb/engine/StatsTest.java               # SHOW STATS
+src/test/java/top/tankenqi/zingdb/engine/SlowQueryLoggerTest.java
+src/test/java/top/tankenqi/zingdb/engine/net/PackagerTest.java        # wire protocol
+src/test/java/top/tankenqi/zingdb/cli/ui/TableRendererTest.java       # terminal rendering
 ```
 
 ## Known Limitations (teaching-grade tradeoffs)

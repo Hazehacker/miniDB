@@ -86,7 +86,7 @@ mvn -q compile
 
 ```bash
 mvn -q exec:java \
-  -Dexec.mainClass="top.tankenqi.zingdb.backend.Launcher" \
+  -Dexec.mainClass="top.tankenqi.zingdb.engine.Launcher" \
   -Dexec.args="-create /tmp/zingdb/db"
 ```
 
@@ -96,7 +96,7 @@ mvn -q exec:java \
 
 ```bash
 mvn -q exec:java \
-  -Dexec.mainClass="top.tankenqi.zingdb.backend.Launcher" \
+  -Dexec.mainClass="top.tankenqi.zingdb.engine.Launcher" \
   -Dexec.args="-open /tmp/zingdb/db"
 ```
 
@@ -111,22 +111,22 @@ mvn -q exec:java \
 新开一个终端：
 
 ```bash
-mvn -q exec:java -Dexec.mainClass="top.tankenqi.zingdb.client.Launcher"
+mvn -q exec:java -Dexec.mainClass="top.tankenqi.zingdb.cli.Launcher"
 ```
 
 非交互用法：
 
 ```bash
 # 执行单条 SQL
-mvn -q exec:java -Dexec.mainClass="top.tankenqi.zingdb.client.Launcher" \
+mvn -q exec:java -Dexec.mainClass="top.tankenqi.zingdb.cli.Launcher" \
   -Dexec.args="-e 'select * from users'"
 
 # 执行脚本文件
-mvn -q exec:java -Dexec.mainClass="top.tankenqi.zingdb.client.Launcher" \
+mvn -q exec:java -Dexec.mainClass="top.tankenqi.zingdb.cli.Launcher" \
   -Dexec.args="-f schema.sql"
 
 # 远程连接 + 关闭颜色
-mvn -q exec:java -Dexec.mainClass="top.tankenqi.zingdb.client.Launcher" \
+mvn -q exec:java -Dexec.mainClass="top.tankenqi.zingdb.cli.Launcher" \
   -Dexec.args="--host 10.0.0.5 --port 9999 --no-color"
 ```
 
@@ -312,17 +312,28 @@ zingdb › \stats
 
 ```
 src/main/java/top/tankenqi/zingdb/
-├─ backend/
-│  ├─ Launcher.java                      入口（create / open）
-│  ├─ common/                            错误码 / 异常
-│  ├─ dm/                                数据管理（页 / 缓存 / 日志 / DataItem）
-│  ├─ tm/                                事务 ID 管理
-│  ├─ vm/                                MVCC + 锁表 + 死锁检测
-│  ├─ im/                                B+ Tree 索引
-│  ├─ tbm/                               表 / 字段 / Planner / Evaluator
-│  ├─ parser/                            Tokenizer / Parser / AST
-│  └─ server/                            Server / Executor / Metrics / SlowQueryLogger
-├─ client/
+├─ sql_compiler/                         SQL 编译器（词法 / 语法 / AST / 计划）
+│  ├─ Tokenizer.java                     词法分析
+│  ├─ Parser.java                        递归下降语法分析
+│  ├─ Planner.java / ExprEvaluator.java  执行计划生成 / 表达式求值
+│  └─ statement/                         AST 节点（23 个）
+├─ storage/                              存储系统
+│  ├─ DataManager.java                   数据管理（页 / 缓存 / 日志 / DataItem）
+│  ├─ page/                              8KB 页实现
+│  ├─ buffer/                            页缓存（PageCache）
+│  ├─ dataItem/                          记录单元
+│  ├─ logger/                            日志文件
+│  ├─ pageIndex/                         页元数据索引
+│  └─ index/                             B+ Tree 索引
+├─ engine/                               数据库引擎
+│  ├─ Launcher.java                      服务端入口（create / open）
+│  ├─ Server.java / Executor.java        连接处理 / 语句分发
+│  ├─ ServerMetrics.java                 运行指标
+│  ├─ SlowQueryLogger.java               慢查询日志
+│  ├─ table/                             表 / 字段 / 行目录（原 tbm）
+│  ├─ tx/                                事务 ID 管理 + MVCC + 锁表（原 tm / vm）
+│  └─ net/                               协议层（Encoder / Transporter / Package / ResultSet）
+├─ cli/                                  命令行接口
 │  ├─ Launcher.java                      客户端入口（CLI 参数）
 │  ├─ Client.java / RoundTripper.java    传输封装
 │  ├─ Shell.java                         JLine REPL
@@ -335,12 +346,14 @@ src/main/java/top/tankenqi/zingdb/
 │     ├─ Prompter.java                   提示符状态机
 │     ├─ MetaCommand.java                \ 命令解析
 │     └─ HelpPrinter.java                \h 帮助
-├─ transport/                            协议层（Encoder / Transporter / Package / ResultSet）
-└─ common/
-   ├─ Error.java                         预定义错误对象
-   └─ ZingDBException.java               带错误码的异常基类
+└─ utils/                                工具与常量
+   ├─ Error.java / ZingDBException.java  预定义错误对象 / 带错误码的异常基类
+   ├─ Panic.java                         致命错误退出
+   ├─ Parser.java / Types.java           字节编解码 / 类型转换
+   ├─ RandomUtil.java / ParseStringRes.java
+   └─ AbstractCache.java / SubArray.java 通用 LRU 缓存 / 字节视图
 
-src/test/java/...                        66 个单元 + 端到端测试
+src/test/java/...                        19 个测试类 / 86 个测试用例（与主源同构）
 ```
 
 ## 开发
@@ -350,12 +363,12 @@ src/test/java/...                        66 个单元 + 端到端测试
 mvn test
 
 # 关键测试文件
-src/test/java/top/tankenqi/zingdb/backend/parser/ParserV2Test.java    # AST 解析
-src/test/java/top/tankenqi/zingdb/backend/server/EndToEndSqlTest.java # 端到端 SQL
-src/test/java/top/tankenqi/zingdb/backend/server/StatsTest.java       # SHOW STATS
-src/test/java/top/tankenqi/zingdb/backend/server/SlowQueryLoggerTest.java
-src/test/java/top/tankenqi/zingdb/transport/PackagerTest.java         # 协议
-src/test/java/top/tankenqi/zingdb/client/ui/TableRendererTest.java    # 终端渲染
+src/test/java/top/tankenqi/zingdb/sql_compiler/ParserV2Test.java      # AST 解析
+src/test/java/top/tankenqi/zingdb/engine/EndToEndSqlTest.java         # 端到端 SQL
+src/test/java/top/tankenqi/zingdb/engine/StatsTest.java               # SHOW STATS
+src/test/java/top/tankenqi/zingdb/engine/SlowQueryLoggerTest.java
+src/test/java/top/tankenqi/zingdb/engine/net/PackagerTest.java        # 协议
+src/test/java/top/tankenqi/zingdb/cli/ui/TableRendererTest.java       # 终端渲染
 ```
 
 ## 已知限制（教学型 DB 取舍）
