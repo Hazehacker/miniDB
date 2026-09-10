@@ -33,3 +33,14 @@ buildNumber.properties
 /zingdb.xid
 *.db_tmp
 *.bt_tmp
+
+# data/ keeps the launcher scripts (start-*.cmd, relaunch.ps1) under version
+# control; everything that is runtime state or machine-specific is not.
+# cp.txt is produced by: mvn dependency:build-classpath -Dmdep.outputFile=data/cp.txt
+data/cp.txt
+data/*.db
+data/*.bt
+data/*.log
+data/*.xid
+data/*.db_tmp
+data/*.bt_tmp
